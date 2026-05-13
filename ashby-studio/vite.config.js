@@ -7,5 +7,5 @@ export default defineConfig({
   // IMPORTANT: must match your repo name exactly.
   // If you rename the repo, change this too.
   // For a user/organization page (repo = <username>.github.io), set this to '/'.
-  base: '/ashby-studio/',
+  base: '/Ashby-Studio/',
 })
