@@ -34,6 +34,7 @@ function MaterialSearch({ pool, selectedId, onSelect }) {
   const [open, setOpen] = useState(false);
   const [dropRect, setDropRect] = useState(null);
   const anchorRef = useRef(null);
+  const portalRef = useRef(null);
   const inputRef = useRef(null);
 
   const selected = pool.find(m => m.id === selectedId) ?? null;
@@ -58,7 +59,13 @@ function MaterialSearch({ pool, selectedId, onSelect }) {
     const onScroll = () => updateRect();
     const onResize = () => updateRect();
     const onMouse = e => {
-      if (!anchorRef.current?.contains(e.target)) setOpen(false);
+      // Keep open when clicking inside the anchor OR the portal dropdown itself
+      if (
+        !anchorRef.current?.contains(e.target) &&
+        !portalRef.current?.contains(e.target)
+      ) {
+        setOpen(false);
+      }
     };
     window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', onResize);
@@ -116,7 +123,7 @@ function MaterialSearch({ pool, selectedId, onSelect }) {
       </div>
 
       {open && dropRect && createPortal(
-        <div style={{
+        <div ref={portalRef} style={{
           position: 'fixed',
           top: dropRect.bottom + 3,
           left: dropRect.left,
