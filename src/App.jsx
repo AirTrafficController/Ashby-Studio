@@ -20,6 +20,79 @@ import CompatibilityMatrix from './components/CompatibilityMatrix.jsx';
 import Tour from './components/Tour.jsx';
 
 /* ============================================================
+   SUPER-FAMILY GROUPING
+   Maps each material's fine-grained `family` into the broad
+   class shown as a tinted background region on the chart.
+   ============================================================ */
+
+const SUPERFAMILY = {
+  'Aluminium alloy':         'Metals & alloys',
+  'Copper alloy':            'Metals & alloys',
+  'Cu-Al alloy':             'Metals & alloys',
+  'Magnesium alloy':         'Metals & alloys',
+  'Ni-superalloy':           'Metals & alloys',
+  'Titanium alloy':          'Metals & alloys',
+  'Non-oxide ceramic':       'Ceramics',
+  'Oxide ceramic':           'Ceramics',
+  'Ceramic foam':            'Ceramics',
+  'Glass':                   'Glasses',
+  'Aramid composite':        'Composites',
+  'Carbon fibre composite':  'Composites',
+  'Glass fibre composite':   'Composites',
+  'Composite':               'Composites',
+  'Laminate':                'Composites',
+  'PTFE-coated fibreglass':  'Composites',
+  'Laminated fabric':        'Composites',
+  'Thermoplastic':           'Polymers',
+  'Fluoropolymer':           'Polymers',
+  'Chlorinated polymer':     'Polymers',
+  'Polyimide film':          'Polymers',
+  'PVDC laminate film':      'Polymers',
+  'Aluminised film':         'Polymers',
+  'Membrane':                'Polymers',
+  'Fluoroelastomer':         'Elastomers',
+  'Perfluoroelastomer':      'Elastomers',
+  'Polychloroprene rubber':  'Elastomers',
+  'Silicone elastomer':      'Elastomers',
+  'Synthetic elastomer':     'Elastomers',
+  'Synthetic rubber':        'Elastomers',
+  'Thermoplastic elastomer': 'Elastomers',
+  'Aramid fibre':            'Fibres',
+  'High-performance fibre':  'Fibres',
+};
+
+const FAMILY_COLORS = {
+  'Metals & alloys': '#C44545',
+  'Ceramics':        '#E07845',
+  'Glasses':         '#8B5A7A',
+  'Composites':      '#5A6B95',
+  'Polymers':        '#3D7F88',
+  'Elastomers':      '#5FA85A',
+  'Fibres':          '#A89A45',
+};
+
+const FAMILY_ORDER = [
+  'Metals & alloys', 'Ceramics', 'Glasses', 'Composites',
+  'Polymers', 'Elastomers', 'Fibres',
+];
+
+/* Inflate a hull radially in log space so the region visually
+   encloses its members with a bit of breathing room. */
+function inflateLogHull(hull, factor = 0.18) {
+  if (hull.length < 3) return hull;
+  const logged = hull.map(p => [Math.log10(p[0]), Math.log10(p[1])]);
+  const cx = d3.mean(logged, d => d[0]);
+  const cy = d3.mean(logged, d => d[1]);
+  return logged.map(([x, y]) => {
+    const dx = x - cx, dy = y - cy;
+    const r = Math.sqrt(dx * dx + dy * dy) || 1;
+    const nx = cx + dx * (1 + factor) + (dx / r) * 0.05;
+    const ny = cy + dy * (1 + factor) + (dy / r) * 0.05;
+    return [Math.pow(10, nx), Math.pow(10, ny)];
+  });
+}
+
+/* ============================================================
    GEOMETRY HELPERS
    Hulls computed in log space so edges are visually straight
    on log axes before the closed-curve smoothing is applied.
@@ -393,7 +466,7 @@ input[type="range"]::-moz-range-thumb {
    ============================================================ */
 
 function AshbyChart({
-  materials, showPoints, showGrid, showLabels,
+  materials, showPoints, showGrid, showLabels, showFamilies,
   indices, axisConfig, hoverId, setHoverId, focusId, setFocusId,
   onGalvanic,
 }) {
@@ -458,6 +531,35 @@ function AshbyChart({
   }, [materials]);
 
   const hasHighlight = materials.some(m => m.highlightRank);
+
+  /* Aggregate points by super-family, build an inflated log-hull
+     per family, and label at the hull centroid. Recomputed only
+     when the underlying geometry changes. */
+  const familyRegions = useMemo(() => {
+    if (!showFamilies) return [];
+    const groups = new Map();
+    for (const m of geometry) {
+      if (!m.visible) continue;
+      const sf = SUPERFAMILY[m.family];
+      if (!sf) continue;
+      if (!groups.has(sf)) groups.set(sf, []);
+      const bucket = groups.get(sf);
+      for (const p of (m.hull && m.hull.length >= 3 ? m.hull : (m.points || []))) {
+        bucket.push(p);
+      }
+    }
+    const out = [];
+    for (const name of FAMILY_ORDER) {
+      const pts = groups.get(name);
+      if (!pts || pts.length < 3) continue;
+      const tight = logHull(pts);
+      if (tight.length < 3) continue;
+      const hull = inflateLogHull(tight, 0.22);
+      const centroid = logCentroid(hull);
+      out.push({ name, hull, centroid, color: FAMILY_COLORS[name] });
+    }
+    return out;
+  }, [geometry, showFamilies]);
 
   const xTicks = useMemo(() => {
     const [a, b] = xScale.domain();
@@ -629,6 +731,27 @@ function AshbyChart({
             </g>
           )}
 
+          {/* Super-family background regions — broad material classes
+              rendered as tinted blobs underneath individual envelopes. */}
+          {showFamilies && (
+            <g clipPath="url(#plot-clip)" style={{ pointerEvents: 'none' }}>
+              {familyRegions.map(r => {
+                const path = lineGen(r.hull);
+                return (
+                  <path
+                    key={`fr-${r.name}`}
+                    d={path}
+                    fill={r.color}
+                    opacity={0.13}
+                    stroke={r.color}
+                    strokeOpacity={0.35}
+                    strokeWidth={1.2}
+                  />
+                );
+              })}
+            </g>
+          )}
+
           {/* Envelopes — sorted so highlighted render last (on top) */}
           <g clipPath="url(#plot-clip)">
             {[...geometry]
@@ -716,6 +839,43 @@ function AshbyChart({
                   fontWeight={isHL ? 600 : 500}
                 >
                   {name}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Super-family labels — pill-shaped chips at each region's
+              centroid, sized for the family name. */}
+          {showFamilies && familyRegions.map(r => {
+            const lx = xScale(r.centroid[0]);
+            const ly = yScale(r.centroid[1]);
+            if (lx < 0 || ly < 0 || lx > iw || ly > ih) return null;
+            const w = r.name.length * 7.2 + 18;
+            const h = 22;
+            return (
+              <g
+                key={`fl-${r.name}`}
+                transform={`translate(${lx - w/2}, ${ly - h/2})`}
+                style={{ pointerEvents: 'none' }}
+              >
+                <rect
+                  width={w} height={h} rx={11}
+                  fill={r.color}
+                  opacity={0.92}
+                  stroke={THEME.paperLight}
+                  strokeWidth={1.2}
+                />
+                <text
+                  x={w/2} y={h/2 + 0.5}
+                  fill="white"
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontFamily="'IBM Plex Sans', -apple-system, system-ui, sans-serif"
+                  fontSize="11.5"
+                  fontWeight={600}
+                  letterSpacing="0.01em"
+                >
+                  {r.name}
                 </text>
               </g>
             );
@@ -943,6 +1103,7 @@ export default function AshbyStudio() {
   const [showPoints, setShowPoints] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
+  const [showFamilies, setShowFamilies] = useState(true);
   const [dragActive, setDragActive] = useState(false);
 
   // Selection / browse / build mode
@@ -1414,6 +1575,11 @@ export default function AshbyStudio() {
                      checked={showPoints} onChange={e => setShowPoints(e.target.checked)} />
               <span>Show data points</span>
             </label>
+            <label className="flex items-center gap-2.5 cursor-pointer text-sm">
+              <input type="checkbox" className="checkbox"
+                     checked={showFamilies} onChange={e => setShowFamilies(e.target.checked)} />
+              <span>Family regions</span>
+            </label>
           </div>
           )}
 
@@ -1536,6 +1702,7 @@ export default function AshbyStudio() {
             showPoints={showPoints}
             showGrid={showGrid}
             showLabels={showLabels}
+            showFamilies={showFamilies}
             indices={indices}
             axisConfig={axisConfig}
             hoverId={hoverId} setHoverId={setHoverId}
