@@ -5,7 +5,7 @@ import {
   Upload, Download, Eye, EyeOff, Trash2, X, Plus,
   Layers, Grid3x3, ZoomIn, ZoomOut, Maximize2, Sparkles,
   Info, Target, Settings2, Dot, ChevronDown, Zap,
-  FlaskConical, Compass,
+  FlaskConical, Compass, Wrench,
 } from 'lucide-react';
 
 import { THEME, PALETTE } from './theme.js';
@@ -14,6 +14,7 @@ import {
 } from './data/materials.js';
 import SelectionWizard from './components/SelectionWizard.jsx';
 import CustomMaterialModal from './components/CustomMaterialModal.jsx';
+import SpacesuitBuilder from './components/SpacesuitBuilder.jsx';
 import ResizeHandle from './components/ResizeHandle.jsx';
 import CompatibilityMatrix from './components/CompatibilityMatrix.jsx';
 import Tour from './components/Tour.jsx';
@@ -944,8 +945,8 @@ export default function AshbyStudio() {
   const [showLabels, setShowLabels] = useState(true);
   const [dragActive, setDragActive] = useState(false);
 
-  // Selection / browse mode
-  const [mode, setMode] = useState('select'); // 'select' | 'browse'
+  // Selection / browse / build mode
+  const [mode, setMode] = useState('select'); // 'select' | 'browse' | 'build'
 
   // Chart axes by property key
   const [chartAxes, setChartAxes] = useState({ xKey: 'density', yKey: 'modulus' });
@@ -1223,6 +1224,14 @@ export default function AshbyStudio() {
             <Compass size={11} />
             Browse
           </button>
+          <button
+            className={`mode-tab ${mode === 'build' ? 'mode-tab-active' : 'mode-tab-inactive'}`}
+            onClick={() => setMode('build')}
+            style={{ border: 'none' }}
+          >
+            <Wrench size={11} />
+            Build
+          </button>
         </div>
 
         <div className="flex items-center gap-2">
@@ -1236,10 +1245,17 @@ export default function AshbyStudio() {
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left sidebar */}
+
+        {/* Build mode — full-width spacesuit builder */}
+        {mode === 'build' && (
+          <SpacesuitBuilder materials={materials} />
+        )}
+
+        {/* Left sidebar — hidden in build mode */}
         <aside
           className="flex flex-col scroll-thin overflow-y-auto relative"
           style={{
+            display: mode === 'build' ? 'none' : undefined,
             width: leftWidth, minWidth: leftWidth,
             background: THEME.paperLight,
             borderRight: `1px solid ${THEME.border}`,
@@ -1513,8 +1529,8 @@ export default function AshbyStudio() {
           </div>
         </aside>
 
-        {/* Chart area */}
-        <main className="flex-1 relative">
+        {/* Chart area — hidden in build mode */}
+        <main className="flex-1 relative" style={{ display: mode === 'build' ? 'none' : undefined }}>
           <AshbyChart
             materials={chartMaterials}
             showPoints={showPoints}
