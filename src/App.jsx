@@ -796,7 +796,9 @@ function AshbyChart({
                         key={i}
                         cx={xScale(p[0])} cy={yScale(p[1])}
                         r={2} fill={m.color} opacity={0.7}
-                      />
+                      >
+                        <title>{m.name}</title>
+                      </circle>
                     ))}
                   </g>
                 );
@@ -969,6 +971,63 @@ function AshbyChart({
           <Download size={14} />
         </button>
       </div>
+
+      {/* Hover info card for the currently-hovered material envelope */}
+      {hoverId && mousePos && (() => {
+        const m = materials.find(x => x.id === hoverId);
+        if (!m) return null;
+        const p = m.props;
+        const rows = p ? [
+          ['Family',    m.family ?? '—'],
+          ['Density',   `${fmt(p.density, 2)} g/cc`],
+          ['Modulus',   `${fmt(p.modulus, 2)} GPa`],
+          ['Strength',  `${fmt(p.strength, 0)} MPa`],
+          ['T_max',     `${fmt(p.tMax, 0)} °C`],
+          ['Cost',      '■'.repeat(p.cost ?? 0) + '□'.repeat(4 - (p.cost ?? 0))],
+          ['Chem res.', '■'.repeat(p.chemRes ?? 0) + '□'.repeat(4 - (p.chemRes ?? 0))],
+        ] : [['Family', m.family ?? '—']];
+        const W = 210, H = rows.length * 16 + 44;
+        const cx = mousePos.mx + margin.left + 14;
+        const cy = mousePos.my + margin.top + 14;
+        const left = cx + W > size.w ? cx - W - 28 : cx;
+        const top  = cy + H > size.h ? size.h - H - 6 : cy;
+        return (
+          <div style={{
+            position: 'absolute', left, top, width: W,
+            pointerEvents: 'none', zIndex: 50,
+            background: THEME.paper, border: `1px solid ${THEME.border}`,
+            borderLeft: `3px solid ${m.color}`,
+            borderRadius: 4, padding: '10px 12px',
+            boxShadow: '0 10px 28px rgba(0,0,0,0.22)',
+          }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: THEME.ink,
+              fontFamily: 'IBM Plex Serif, serif', whiteSpace: 'nowrap',
+              overflow: 'hidden', textOverflow: 'ellipsis', marginBottom: 6 }}>
+              {m.name}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              {rows.map(([k, v]) => (
+                <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline' }}>
+                  <span style={{ fontSize: 9, color: THEME.inkFaint,
+                    fontFamily: 'IBM Plex Mono, monospace', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                    {k}
+                  </span>
+                  <span style={{ fontSize: 10, color: THEME.ink,
+                    fontFamily: 'IBM Plex Mono, monospace', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                    {v}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {!p && (
+              <div style={{ fontSize: 9, color: THEME.inkFaint, marginTop: 6,
+                fontFamily: 'IBM Plex Mono, monospace', fontStyle: 'italic' }}>
+                no property data
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
