@@ -1711,16 +1711,16 @@ export default function AshbyStudio() {
           />
         </main>
 
-        {/* Right wizard panel — shown only in select mode */}
-        {mode === 'select' && (
-          <SelectionWizard
-            materials={materials}
-            width={rightWidth}
-            setWidth={setRightWidth}
-            onHighlight={setHighlightedIds}
-            onAxisRequest={onAxisRequest}
-          />
-        )}
+        {/* Right wizard panel — always mounted so its state
+            persists across mode switches; hidden in non-select modes. */}
+        <SelectionWizard
+          materials={materials}
+          width={rightWidth}
+          setWidth={setRightWidth}
+          onHighlight={setHighlightedIds}
+          onAxisRequest={onAxisRequest}
+          hidden={mode !== 'select'}
+        />
       </div>
 
       {/* Custom material modal */}

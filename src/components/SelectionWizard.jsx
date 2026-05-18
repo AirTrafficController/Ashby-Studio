@@ -47,6 +47,7 @@ export default function SelectionWizard({
   setWidth,
   onHighlight,
   onAxisRequest,
+  hidden = false,
 }) {
   // Pool to draw candidates from. When the host app passes its own
   // materials list (which may include user-added customs), use that;
@@ -176,12 +177,14 @@ export default function SelectionWizard({
     return pughMatrix(baseline, others, criteria, ahp.weights);
   }, [top10, baselineId, candidates, criteria, ahp.weights]);
 
-  /* --- Push highlight to chart --- */
+  /* --- Push highlight to chart. Clear highlights while the
+         wizard is hidden so leaving Select mode doesn't leave
+         stale rankings on the chart. */
   useEffect(() => {
     if (typeof onHighlight === 'function') {
-      onHighlight(step >= 2 ? top3Ids : []);
+      onHighlight(!hidden && step >= 2 ? top3Ids : []);
     }
-  }, [step, top3Ids.join('|'), onHighlight]);
+  }, [hidden, step, top3Ids.join('|'), onHighlight]);
 
   /* --- Push axis request to chart when layer changes --- */
   useEffect(() => {
@@ -203,6 +206,7 @@ export default function SelectionWizard({
     <aside
       className="flex flex-col h-full overflow-hidden relative"
       style={{
+        display: hidden ? 'none' : 'flex',
         width, minWidth: width,
         background: THEME.paperLight,
         borderLeft: `1px solid ${THEME.border}`,
