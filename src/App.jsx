@@ -122,7 +122,8 @@ function fmt(n, digits = 3) {
   if (n === 0) return '0';
   const abs = Math.abs(n);
   if (abs >= 1000 || abs < 0.01) return n.toExponential(2);
-  return n.toPrecision(digits);
+  const safeDig = Math.max(1, Math.min(100, digits));
+  return n.toPrecision(safeDig);
 }
 
 /* ============================================================
@@ -134,7 +135,7 @@ function parseCSV(text, fallbackName) {
   if (!res.data.length) return [];
   let rows = res.data;
   if (rows[0] && typeof rows[0][0] === 'string') {
-    rows[0][0] = rows[0][0].replace(/^\uFEFF/, '');
+    rows[0][0] = rows[0][0].replace(/^﻿/, '');
   }
   const first = rows[0].map(c => String(c).trim());
   const numericish = first.filter(c => c !== '' && !isNaN(parseFloat(c)));
@@ -197,7 +198,7 @@ function parsePropertyCSV(text) {
   if (!res.data.length) return { materials: [], errors: ['Empty CSV.'] };
   const rows = res.data.slice();
   if (rows[0] && typeof rows[0][0] === 'string') {
-    rows[0][0] = rows[0][0].replace(/^\uFEFF/, '');
+    rows[0][0] = rows[0][0].replace(/^﻿/, '');
   }
   const headerRaw = rows[0].map((c) => String(c).trim());
   const header = headerRaw.map((c) => c.toLowerCase().replace(/[\s\-]/g, '_'));
