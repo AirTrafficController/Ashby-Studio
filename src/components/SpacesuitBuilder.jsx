@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Trash2, ChevronUp, ChevronDown, Search, X, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, ChevronUp, ChevronDown, Search, X, AlertCircle, Info } from 'lucide-react';
 import { THEME, PALETTE } from '../theme.js';
 import { MATERIALS } from '../data/materials.js';
 
@@ -24,6 +24,67 @@ const DEFAULT_LAYERS = [
 ];
 
 /* ============================================================
+   PROPS CARD — portal tooltip showing all material properties
+   ============================================================ */
+
+function PropsCard({ material, top, left }) {
+  if (!material) return null;
+  const p = material.props;
+
+  const clampedLeft = Math.min(left, window.innerWidth - 210);
+  const clampedTop  = Math.min(top,  window.innerHeight - 280);
+
+  const rows = [
+    ['Family',    material.family],
+    ['Density',   `${fmt(p.density)} g/cc`],
+    ['Modulus',   `${fmt(p.modulus)} GPa`],
+    ['Strength',  `${fmt(p.strength, 0)} MPa`],
+    ['T_max',     `${fmt(p.tMax, 0)} °C`],
+    ['Cost',      '■'.repeat(p.cost) + '□'.repeat(4 - p.cost)],
+    ['Chem res.', '■'.repeat(p.chemRes) + '□'.repeat(4 - p.chemRes)],
+  ];
+
+  return createPortal(
+    <div style={{
+      position: 'fixed', top: clampedTop, left: clampedLeft,
+      zIndex: 10001,
+      background: THEME.paper,
+      border: `1px solid ${THEME.border}`,
+      borderRadius: 5,
+      padding: '10px 14px',
+      minWidth: 196,
+      boxShadow: '0 10px 28px rgba(0,0,0,0.22)',
+      pointerEvents: 'none',
+    }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: THEME.ink, marginBottom: 2,
+        fontFamily: 'IBM Plex Serif, serif', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {material.name}
+      </div>
+      {material.environment && (
+        <div style={{ fontSize: 8, color: THEME.inkFaint, marginBottom: 8,
+          fontFamily: 'IBM Plex Mono, monospace', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          {material.environment.replace('_', ' ')}
+        </div>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {rows.map(([label, val]) => (
+          <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 14 }}>
+            <span style={{ fontSize: 9, color: THEME.inkFaint,
+              fontFamily: 'IBM Plex Mono, monospace', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+              {label}
+            </span>
+            <span style={{ fontSize: 10, color: THEME.ink, fontFamily: 'IBM Plex Mono, monospace', fontWeight: 500, whiteSpace: 'nowrap' }}>
+              {val}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+/* ============================================================
    MATERIAL SEARCH — dropdown rendered as a body portal so it
    escapes the overflow:hidden card and overflow:auto scroll
    container without any z-index tricks.
@@ -33,6 +94,10 @@ function MaterialSearch({ pool, selectedId, onSelect }) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [dropRect, setDropRect] = useState(null);
+  const [hoveredMat, setHoveredMat] = useState(null);
+  const [hoverItemTop, setHoverItemTop] = useState(0);
+  const [chipInfoOpen, setChipInfoOpen] = useState(false);
+  const [chipInfoPos, setChipInfoPos] = useState({ top: 0, left: 0 });
   const anchorRef = useRef(null);
   const portalRef = useRef(null);
   const inputRef = useRef(null);
@@ -54,12 +119,11 @@ function MaterialSearch({ pool, selectedId, onSelect }) {
   };
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) { setHoveredMat(null); return; }
     updateRect();
     const onScroll = () => updateRect();
     const onResize = () => updateRect();
     const onMouse = e => {
-      // Keep open when clicking inside the anchor OR the portal dropdown itself
       if (
         !anchorRef.current?.contains(e.target) &&
         !portalRef.current?.contains(e.target)
@@ -77,10 +141,18 @@ function MaterialSearch({ pool, selectedId, onSelect }) {
     };
   }, [open]);
 
+  // close chip info tooltip on outside click
+  useEffect(() => {
+    if (!chipInfoOpen) return;
+    const handler = () => setChipInfoOpen(false);
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [chipInfoOpen]);
+
   if (selected) {
     return (
       <div className="flex items-center gap-2 px-2 py-1.5 rounded"
-        style={{ border: `1px solid ${THEME.border}`, background: THEME.paper }}>
+        style={{ border: `1px solid ${THEME.border}`, background: THEME.paper, position: 'relative' }}>
         <span className="flex-1 text-xs font-body truncate" style={{ color: THEME.ink }}>
           {selected.name}
         </span>
@@ -88,10 +160,30 @@ function MaterialSearch({ pool, selectedId, onSelect }) {
           style={{ background: THEME.paperDark, color: THEME.inkMuted }}>
           {selected.family}
         </span>
-        <button onClick={() => onSelect(null)}
+        <button
+          title="View material properties"
+          onMouseDown={e => e.stopPropagation()}
+          onClick={e => {
+            e.stopPropagation();
+            const r = e.currentTarget.getBoundingClientRect();
+            setChipInfoPos({ top: r.bottom + 4, left: r.left - 180 });
+            setChipInfoOpen(v => !v);
+          }}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: THEME.inkMuted,
+            padding: 2, flexShrink: 0, opacity: 0.7, transition: 'opacity 120ms' }}
+          onMouseEnter={e => { e.currentTarget.style.opacity = 1; }}
+          onMouseLeave={e => { e.currentTarget.style.opacity = 0.7; }}
+        >
+          <Info size={11} />
+        </button>
+        <button
+          onClick={() => { onSelect(null); setChipInfoOpen(false); }}
           style={{ background: 'none', border: 'none', cursor: 'pointer', color: THEME.inkMuted, padding: 2, flexShrink: 0 }}>
           <X size={11} />
         </button>
+        {chipInfoOpen && (
+          <PropsCard material={selected} top={chipInfoPos.top} left={chipInfoPos.left} />
+        )}
       </div>
     );
   }
@@ -153,10 +245,17 @@ function MaterialSearch({ pool, selectedId, onSelect }) {
                 display: 'flex', gap: 8,
                 transition: 'background 80ms ease',
               }}
-              onMouseEnter={e => { e.currentTarget.style.background = THEME.paperDark; }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+              onMouseEnter={e => {
+                e.currentTarget.style.background = THEME.paperDark;
+                setHoveredMat(m);
+                setHoverItemTop(e.currentTarget.getBoundingClientRect().top);
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = 'transparent';
+                setHoveredMat(null);
+              }}
               onMouseDown={e => e.preventDefault()}
-              onClick={() => { onSelect(m.id); setQuery(''); setOpen(false); }}
+              onClick={() => { onSelect(m.id); setQuery(''); setOpen(false); setHoveredMat(null); }}
             >
               <span className="text-xs font-body flex-1 truncate" style={{ color: THEME.ink }}>{m.name}</span>
               <span className="font-mono text-[9px] flex-shrink-0" style={{ color: THEME.inkFaint }}>{m.family}</span>
@@ -164,6 +263,11 @@ function MaterialSearch({ pool, selectedId, onSelect }) {
           ))}
         </div>,
         document.body
+      )}
+
+      {/* Hover tooltip to the right of the dropdown */}
+      {open && hoveredMat && dropRect && (
+        <PropsCard material={hoveredMat} top={hoverItemTop} left={dropRect.right + 8} />
       )}
     </div>
   );
