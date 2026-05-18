@@ -136,7 +136,10 @@ export default function SelectionWizard({
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
         const s = pairValues[`${i}_${j}`] ?? 0;
-        upper.push(sliderToSaaty(s));
+        // Slider convention: positive = right-side (j) dominant.
+        // sliderToSaaty's upper-triangle convention is positive = i dominant,
+        // so negate before mapping.
+        upper.push(sliderToSaaty(-s));
       }
     }
     const M = buildPairwise(n, upper);
@@ -590,8 +593,8 @@ function WeightPanel({ criteria, pairValues, setPairValues, ahp }) {
                 />
                 <div className="font-mono text-[9px] mt-1" style={{ color: THEME.inkMuted }}>
                   {v === 0 ? 'equal'
-                    : v > 0 ? `${criteria[i].label} ${sa.toFixed(0)}× more important`
-                    : `${criteria[j].label} ${(1 / sa).toFixed(0)}× more important`}
+                    : v > 0 ? `${criteria[j].label} ${sa.toFixed(0)}× more important`
+                    : `${criteria[i].label} ${(1 / sa).toFixed(0)}× more important`}
                 </div>
               </div>
             );
