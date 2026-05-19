@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { X, Plus } from 'lucide-react';
+import { X, Plus, Search, Loader2, AlertCircle } from 'lucide-react';
 import { THEME } from '../theme.js';
 import { ENVIRONMENTS, ENV_LABEL, LAYERS, LAYER_LABEL } from '../data/materials.js';
+import { searchByFormula, guessFamily } from '../data/materialsProject.js';
 
 /* ============================================================
    CustomMaterialModal
@@ -12,11 +13,58 @@ import { ENVIRONMENTS, ENV_LABEL, LAYERS, LAYER_LABEL } from '../data/materials.
    handler is invoked.
    ============================================================ */
 
-export default function CustomMaterialModal({ open, onClose, onAdd }) {
+export default function CustomMaterialModal({ open, onClose, onAdd, mpApiKey }) {
   const [form, setForm] = useState(initialForm());
   const [error, setError] = useState(null);
 
+  // Materials Project lookup state
+  const [mpQuery, setMpQuery] = useState('');
+  const [mpResults, setMpResults] = useState(null); // null | array
+  const [mpLoading, setMpLoading] = useState(false);
+  const [mpError, setMpError] = useState(null);
+  const [mpPickedId, setMpPickedId] = useState(null);
+
   if (!open) return null;
+
+  const runLookup = async () => {
+    setMpError(null);
+    setMpResults(null);
+    setMpPickedId(null);
+    if (!mpApiKey) {
+      setMpError('Add a Materials Project API key in the About dialog first.');
+      return;
+    }
+    setMpLoading(true);
+    try {
+      const entries = await searchByFormula(mpQuery, mpApiKey);
+      if (entries.length === 0) {
+        setMpError(`No inorganic crystals found for "${mpQuery}". Polymers and composites are not in Materials Project.`);
+      } else {
+        setMpResults(entries);
+        setMpPickedId(entries[0].mpId);
+      }
+    } catch (e) {
+      setMpError(e.message || 'Lookup failed.');
+    } finally {
+      setMpLoading(false);
+    }
+  };
+
+  const applyPicked = () => {
+    if (!mpResults) return;
+    const e = mpResults.find((x) => x.mpId === mpPickedId);
+    if (!e) return;
+    setForm((f) => ({
+      ...f,
+      name: f.name.trim() || `${e.formula} (${e.mpId})`,
+      family: f.family.trim() || guessFamily(e.elements),
+      density: e.density != null ? String(Math.round(e.density * 1000) / 1000) : f.density,
+      modulus: e.modulus != null ? String(e.modulus) : f.modulus,
+      notes: f.notes.trim() || `From Materials Project ${e.mpId}${e.symmetry ? ` (${e.symmetry})` : ''}. Elastic moduli are DFT-computed.`,
+    }));
+    setMpResults(null);
+    setMpQuery('');
+  };
 
   const update = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -108,6 +156,117 @@ export default function CustomMaterialModal({ open, onClose, onAdd }) {
         <div className="font-mono text-[10px] uppercase tracking-widest mb-4"
              style={{ color: THEME.inkFaint }}>
           full property spec
+        </div>
+
+        {/* Materials Project quick-fill */}
+        <div
+          className="mb-4 p-3"
+          style={{
+            border: `1px dashed ${THEME.border}`,
+            background: THEME.paper,
+            borderRadius: 4,
+          }}
+        >
+          <div className="font-mono uppercase mb-2"
+               style={{ fontSize: 9, letterSpacing: '0.1em', color: THEME.inkFaint }}>
+            Quick fill from Materials Project
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={mpQuery}
+              onChange={(e) => setMpQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runLookup(); } }}
+              placeholder="formula, e.g. Al2O3, Ti, SiC"
+              className="font-mono flex-1"
+              style={{
+                fontSize: 12,
+                padding: '5px 7px',
+                border: `1px solid ${THEME.border}`,
+                background: THEME.paperLight,
+                color: THEME.ink,
+                borderRadius: 3,
+                outline: 'none',
+              }}
+            />
+            <button
+              className="btn"
+              onClick={runLookup}
+              disabled={mpLoading || !mpQuery.trim()}
+              title={mpApiKey ? 'Search Materials Project' : 'Add MP API key in About dialog'}
+            >
+              {mpLoading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+              Search
+            </button>
+          </div>
+          {!mpApiKey && (
+            <div className="mt-2 font-mono text-[10px]" style={{ color: THEME.inkFaint }}>
+              No API key set. Add one in the About dialog (free at materialsproject.org).
+            </div>
+          )}
+          {mpError && (
+            <div className="mt-2 flex items-start gap-1.5 text-xs" style={{ color: THEME.accent }}>
+              <AlertCircle size={12} style={{ marginTop: 2, flexShrink: 0 }} />
+              <span>{mpError}</span>
+            </div>
+          )}
+          {mpResults && (
+            <div className="mt-3 flex flex-col gap-1.5">
+              <div className="font-mono text-[10px]" style={{ color: THEME.inkFaint }}>
+                {mpResults.length} match{mpResults.length === 1 ? '' : 'es'} — pick one:
+              </div>
+              <div
+                className="flex flex-col gap-1 scroll-thin"
+                style={{ maxHeight: 180, overflowY: 'auto' }}
+              >
+                {mpResults.map((e, i) => {
+                  const picked = mpPickedId === e.mpId;
+                  return (
+                    <label
+                      key={e.mpId}
+                      className="flex items-center gap-2 cursor-pointer px-2 py-1.5"
+                      style={{
+                        border: `1px solid ${picked ? THEME.ink : THEME.border}`,
+                        background: picked ? THEME.paperDark : THEME.paperLight,
+                        borderRadius: 3,
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        checked={picked}
+                        onChange={() => setMpPickedId(e.mpId)}
+                      />
+                      <div className="flex-1 flex items-baseline gap-2">
+                        <span className="font-mono text-xs" style={{ color: THEME.ink }}>
+                          {e.formula}
+                        </span>
+                        <span className="font-mono text-[10px]" style={{ color: THEME.inkFaint }}>
+                          {e.mpId}{e.symmetry ? ` · ${e.symmetry}` : ''}
+                        </span>
+                        {i === 0 && (
+                          <span className="font-mono text-[9px]"
+                                style={{ color: THEME.accent }}>ground state</span>
+                        )}
+                      </div>
+                      <span className="font-mono text-[10px]" style={{ color: THEME.inkMuted }}>
+                        ρ={e.density != null ? e.density.toFixed(2) : '—'}
+                        {' '}E={e.modulus != null ? e.modulus : '—'}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+              <div className="flex items-center gap-2 mt-1">
+                <div className="flex-1 font-mono text-[10px]" style={{ color: THEME.inkFaint }}>
+                  Strength &amp; T_max are not in MP — fill manually below.
+                </div>
+                <button className="btn" onClick={() => setMpResults(null)}>Cancel</button>
+                <button className="btn btn-primary" onClick={applyPicked}>
+                  Use selected
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-x-4 gap-y-3">

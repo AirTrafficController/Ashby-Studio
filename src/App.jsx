@@ -122,8 +122,7 @@ function fmt(n, digits = 3) {
   if (n === 0) return '0';
   const abs = Math.abs(n);
   if (abs >= 1000 || abs < 0.01) return n.toExponential(2);
-  const safeDig = Math.max(1, Math.min(100, digits));
-  return n.toPrecision(safeDig);
+  return n.toPrecision(digits);
 }
 
 /* ============================================================
@@ -1194,6 +1193,15 @@ export default function AshbyStudio() {
   const [csvErrors, setCsvErrors] = useState([]);
   const fileInputRef = useRef(null);
 
+  /* Materials Project API key — persisted in localStorage so
+     users only enter it once. Empty string means no key set. */
+  const [mpApiKey, setMpApiKey] = useState(() => {
+    try { return localStorage.getItem('ashby:mpApiKey') || ''; } catch { return ''; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('ashby:mpApiKey', mpApiKey); } catch {}
+  }, [mpApiKey]);
+
   /* First-launch tour: open automatically if the user has never
      dismissed it. Replay-able from the About modal. */
   const [tourOpen, setTourOpen] = useState(() => {
@@ -1788,6 +1796,7 @@ export default function AshbyStudio() {
         open={customOpen}
         onClose={() => setCustomOpen(false)}
         onAdd={addCustomMaterial}
+        mpApiKey={mpApiKey}
       />
 
       {/* Galvanic compatibility matrix */}
@@ -1862,6 +1871,42 @@ export default function AshbyStudio() {
               built-in database are nominal, order-of-magnitude only. Verify
               against data sheets before committing to a design.
             </p>
+
+            <div
+              className="mt-4 pt-3"
+              style={{ borderTop: `1px solid ${THEME.borderSoft}` }}
+            >
+              <div className="font-mono uppercase mb-1.5"
+                   style={{ fontSize: 9, letterSpacing: '0.1em', color: THEME.inkFaint }}>
+                Materials Project API key
+              </div>
+              <input
+                type="password"
+                value={mpApiKey}
+                onChange={(e) => setMpApiKey(e.target.value)}
+                placeholder="paste key — stored in this browser only"
+                className="font-mono w-full"
+                style={{
+                  fontSize: 12,
+                  padding: '5px 7px',
+                  border: `1px solid ${THEME.border}`,
+                  background: THEME.paperLight,
+                  color: THEME.ink,
+                  borderRadius: 3,
+                  outline: 'none',
+                }}
+              />
+              <div className="font-mono text-[10px] mt-1" style={{ color: THEME.inkFaint }}>
+                Free key from{' '}
+                <a href="https://next-gen.materialsproject.org/api"
+                   target="_blank" rel="noopener noreferrer"
+                   style={{ color: THEME.accent }}>
+                  materialsproject.org/api
+                </a>
+                . Enables "Quick fill" in the Add-material dialog (autofills density &amp; modulus for inorganic crystals).
+              </div>
+            </div>
+
             <div
               className="flex items-center gap-2 mt-4 pt-3"
               style={{ borderTop: `1px solid ${THEME.borderSoft}` }}
