@@ -122,7 +122,8 @@ function fmt(n, digits = 3) {
   if (n === 0) return '0';
   const abs = Math.abs(n);
   if (abs >= 1000 || abs < 0.01) return n.toExponential(2);
-  return n.toPrecision(digits);
+  const safeDig = Math.max(1, Math.min(100, digits));
+  return n.toPrecision(safeDig);
 }
 
 /* ============================================================
