@@ -24,6 +24,76 @@ const DEFAULT_LAYERS = [
 ];
 
 /* ============================================================
+   WSM SCORING — Weighted Sum Model with layer-specific presets
+   Each material is scored 0–100 against the pool's range,
+   weighted by what matters most in that layer's role.
+   Lower-is-better properties (density, cost) are inverted.
+   ============================================================ */
+
+const LAYER_WEIGHTS_MAP = {
+  'Outer Shell':        { density: 0.10, modulus: 0.15, strength: 0.30, tMax: 0.20, chemRes: 0.20, cost: 0.05 },
+  'Thermal Insulation': { density: 0.15, modulus: 0.05, strength: 0.10, tMax: 0.40, chemRes: 0.15, cost: 0.15 },
+  'Pressure Bladder':   { density: 0.10, modulus: 0.10, strength: 0.20, tMax: 0.15, chemRes: 0.35, cost: 0.10 },
+  'Inner Liner':        { density: 0.25, modulus: 0.05, strength: 0.10, tMax: 0.10, chemRes: 0.25, cost: 0.25 },
+};
+const DEFAULT_WEIGHTS = { density: 0.15, modulus: 0.15, strength: 0.20, tMax: 0.20, chemRes: 0.20, cost: 0.10 };
+
+const LOWER_BETTER = new Set(['density', 'cost']);
+
+function computeNorms(pool) {
+  const keys = ['density', 'modulus', 'strength', 'tMax', 'cost', 'chemRes'];
+  const out = {};
+  for (const k of keys) {
+    const vals = pool.map(m => m.props?.[k]).filter(Number.isFinite);
+    out[k] = vals.length
+      ? { lo: Math.min(...vals), hi: Math.max(...vals) }
+      : { lo: 0, hi: 1 };
+  }
+  return out;
+}
+
+function wsmScore(material, layerName, norms) {
+  if (!material?.props || !norms) return null;
+  const weights = LAYER_WEIGHTS_MAP[layerName] ?? DEFAULT_WEIGHTS;
+  let score = 0;
+  for (const [k, w] of Object.entries(weights)) {
+    const v = material.props[k];
+    const { lo, hi } = norms[k];
+    if (!Number.isFinite(v) || hi === lo) { score += w * 0.5; continue; }
+    let norm = (v - lo) / (hi - lo);
+    if (LOWER_BETTER.has(k)) norm = 1 - norm;
+    score += w * norm;
+  }
+  return Math.round(score * 100);
+}
+
+function scoreColor(s) {
+  const hue = Math.max(0, Math.min(120, s * 1.2));
+  return `hsl(${hue}, 60%, 42%)`;
+}
+
+function ScoreBadge({ score, width = 48 }) {
+  if (score == null) return null;
+  const c = scoreColor(score);
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{
+        width, height: 4, borderRadius: 2,
+        background: THEME.borderSoft, overflow: 'hidden', flexShrink: 0,
+      }}>
+        <div style={{
+          width: `${score}%`, height: '100%', background: c,
+          borderRadius: 2, transition: 'width 220ms ease',
+        }} />
+      </div>
+      <span className="font-mono" style={{ fontSize: 10, color: c, fontWeight: 600, minWidth: 22, textAlign: 'right' }}>
+        {score}
+      </span>
+    </div>
+  );
+}
+
+/* ============================================================
    PROPS CARD — portal tooltip showing all material properties
    ============================================================ */
 
@@ -277,8 +347,9 @@ function MaterialSearch({ pool, selectedId, onSelect }) {
    SLOT ROW — one material + ply count inside a layer
    ============================================================ */
 
-function SlotRow({ slot, pool, onUpdate, onRemove, canRemove }) {
+function SlotRow({ slot, pool, onUpdate, onRemove, canRemove, layerName, norms }) {
   const material = slot.materialId ? pool.find(m => m.id === slot.materialId) : null;
+  const score = material ? wsmScore(material, layerName, norms) : null;
 
   return (
     <div className="flex flex-col gap-1.5 rounded px-2 py-2"
@@ -329,6 +400,10 @@ function SlotRow({ slot, pool, onUpdate, onRemove, canRemove }) {
               </div>
             ))}
           </div>
+          <div className="flex-1" />
+          <div title={`Layer fit score for "${layerName}" (WSM, 0–100)`}>
+            <ScoreBadge score={score} />
+          </div>
         </div>
       )}
     </div>
@@ -339,11 +414,20 @@ function SlotRow({ slot, pool, onUpdate, onRemove, canRemove }) {
    LAYER CARD — editable name + N stacked material slots
    ============================================================ */
 
-function LayerCard({ layer, index, total, pool, color, onUpdate, onRemove, onMove }) {
+function LayerCard({ layer, index, total, pool, color, onUpdate, onRemove, onMove, norms }) {
   const addSlot = () => onUpdate({ slots: [...layer.slots, makeSlot()] });
   const removeSlot = id => onUpdate({ slots: layer.slots.filter(s => s.id !== id) });
   const updateSlot = (id, patch) =>
     onUpdate({ slots: layer.slots.map(s => s.id === id ? { ...s, ...patch } : s) });
+
+  const layerScores = layer.slots
+    .map(s => s.materialId ? pool.find(m => m.id === s.materialId) : null)
+    .map(m => m ? wsmScore(m, layer.name, norms) : null)
+    .filter(s => s != null);
+  const avgScore = layerScores.length
+    ? Math.round(layerScores.reduce((a, b) => a + b, 0) / layerScores.length)
+    : null;
+  const presetMatch = !!LAYER_WEIGHTS_MAP[layer.name];
 
   return (
     <div className="rounded"
@@ -365,6 +449,13 @@ function LayerCard({ layer, index, total, pool, color, onUpdate, onRemove, onMov
           onChange={e => onUpdate({ name: e.target.value })}
           placeholder="Layer name…"
         />
+        {avgScore != null && (
+          <div className="flex-shrink-0" title={presetMatch
+            ? `Avg layer score using "${layer.name}" preset weights`
+            : `Avg layer score using default weights (rename to a preset for tailored weighting)`}>
+            <ScoreBadge score={avgScore} width={36} />
+          </div>
+        )}
         <div className="flex items-center gap-0.5 flex-shrink-0">
           <button className="btn btn-ghost" onClick={() => onMove(-1)} disabled={index === 0}
             style={{ opacity: index === 0 ? 0.25 : 1, padding: '3px 5px' }} title="Move outward">
@@ -391,6 +482,8 @@ function LayerCard({ layer, index, total, pool, color, onUpdate, onRemove, onMov
             onUpdate={patch => updateSlot(slot.id, patch)}
             onRemove={() => removeSlot(slot.id)}
             canRemove={layer.slots.length > 1}
+            layerName={layer.name}
+            norms={norms}
           />
         ))}
 
@@ -414,11 +507,30 @@ function LayerCard({ layer, index, total, pool, color, onUpdate, onRemove, onMov
    SUIT SUMMARY — right panel
    ============================================================ */
 
-function SuitSummary({ layers, pool }) {
+function SuitSummary({ layers, pool, norms }) {
   const allSlots = layers.flatMap(l => l.slots);
   const configuredSlots = allSlots.filter(s => s.materialId);
   const totalPlies = allSlots.reduce((s, sl) => s + sl.plies, 0);
   const configuredLayers = layers.filter(l => l.slots.some(s => s.materialId));
+
+  // Overall suit score: average of each layer's average score, weighted by ply count
+  const overallScore = (() => {
+    let num = 0, den = 0;
+    for (const layer of layers) {
+      const layerMatScores = layer.slots
+        .map(s => {
+          const m = s.materialId ? pool.find(mm => mm.id === s.materialId) : null;
+          const sc = m ? wsmScore(m, layer.name, norms) : null;
+          return sc != null ? { sc, plies: s.plies } : null;
+        })
+        .filter(Boolean);
+      for (const { sc, plies } of layerMatScores) {
+        num += sc * plies;
+        den += plies;
+      }
+    }
+    return den > 0 ? Math.round(num / den) : null;
+  })();
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -493,6 +605,16 @@ function SuitSummary({ layers, pool }) {
               value={fmt(Math.min(...configuredSlots.map(s =>
                 pool.find(m => m.id === s.materialId)?.props.tMax ?? Infinity)), 0)} />
           )}
+          {overallScore != null && (
+            <div className="flex flex-col">
+              <span className="font-mono" style={{ fontSize: 9, color: THEME.inkFaint, letterSpacing: '0.08em' }}>
+                SUIT SCORE
+              </span>
+              <div style={{ marginTop: 4 }}>
+                <ScoreBadge score={overallScore} width={64} />
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -514,7 +636,7 @@ function SuitSummary({ layers, pool }) {
               <table className="w-full" style={{ borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: THEME.paper }}>
-                    {['#', 'Layer / Material', 'Family', 'Plies', 'ρ g/cc', 'E GPa', 'σ MPa', 'T_max °C', 'Cost', 'Chem'].map(h => (
+                    {['#', 'Layer / Material', 'Family', 'Plies', 'ρ g/cc', 'E GPa', 'σ MPa', 'T_max °C', 'Cost', 'Chem', 'Score'].map(h => (
                       <th key={h} className="font-mono text-left px-2 py-2"
                         style={{ fontSize: 9, letterSpacing: '0.05em', color: THEME.inkMuted, fontWeight: 500, whiteSpace: 'nowrap' }}>
                         {h}
@@ -576,6 +698,11 @@ function SuitSummary({ layers, pool }) {
                           <td className="px-2 py-2 font-mono text-center" style={{ fontSize: 11, color: THEME.ink }}>
                             {mat ? mat.props.chemRes : '—'}
                           </td>
+                          <td className="px-2 py-2" style={{ minWidth: 88 }}>
+                            {mat ? <ScoreBadge score={wsmScore(mat, layer.name, norms)} /> : (
+                              <span className="font-mono" style={{ fontSize: 11, color: THEME.inkFaint }}>—</span>
+                            )}
+                          </td>
                         </tr>
                       );
                     });
@@ -585,6 +712,9 @@ function SuitSummary({ layers, pool }) {
             </div>
             <div className="font-mono text-[9px] mt-3" style={{ color: THEME.inkFaint }}>
               Cost: 1=low → 4=very high · Chem resistance: 1=poor → 4=excellent · T_max = max continuous use temperature
+            </div>
+            <div className="font-mono text-[9px] mt-1" style={{ color: THEME.inkFaint }}>
+              Score: WSM 0–100 vs. pool range, weighted per layer role (rename a layer to a preset — Outer Shell, Thermal Insulation, Pressure Bladder, Inner Liner — for tailored weights).
             </div>
           </>
         )}
@@ -617,6 +747,8 @@ export default function SpacesuitBuilder({ materials: liveMaterials }) {
       : MATERIALS;
     return src.filter(m => m.props && typeof m.props.density === 'number');
   }, [liveMaterials]);
+
+  const norms = useMemo(() => computeNorms(pool), [pool]);
 
   const [layers, setLayers] = useState(() =>
     DEFAULT_LAYERS.map(name => makeLayer(name))
@@ -671,6 +803,7 @@ export default function SpacesuitBuilder({ materials: liveMaterials }) {
               onUpdate={patch => updateLayer(layer.id, patch)}
               onRemove={() => removeLayer(layer.id)}
               onMove={dir => moveLayer(layer.id, dir)}
+              norms={norms}
             />
           ))}
         </div>
@@ -684,7 +817,7 @@ export default function SpacesuitBuilder({ materials: liveMaterials }) {
 
       {/* ── Right: visual summary ── */}
       <main className="flex-1 overflow-hidden" style={{ background: THEME.paper }}>
-        <SuitSummary layers={layers} pool={pool} />
+        <SuitSummary layers={layers} pool={pool} norms={norms} />
       </main>
 
     </div>
