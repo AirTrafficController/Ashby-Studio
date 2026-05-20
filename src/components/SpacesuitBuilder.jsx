@@ -76,17 +76,17 @@ function ScoreBadge({ score, width = 48 }) {
   if (score == null) return null;
   const c = scoreColor(score);
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0, maxWidth: '100%' }}>
       <div style={{
         width, height: 4, borderRadius: 2,
-        background: THEME.borderSoft, overflow: 'hidden', flexShrink: 0,
+        background: THEME.borderSoft, overflow: 'hidden', flexShrink: 1, minWidth: 16,
       }}>
         <div style={{
           width: `${score}%`, height: '100%', background: c,
           borderRadius: 2, transition: 'width 220ms ease',
         }} />
       </div>
-      <span className="font-mono" style={{ fontSize: 10, color: c, fontWeight: 600, minWidth: 22, textAlign: 'right' }}>
+      <span className="font-mono" style={{ fontSize: 10, color: c, fontWeight: 600, minWidth: 18, textAlign: 'right', flexShrink: 0 }}>
         {score}
       </span>
     </div>
@@ -373,7 +373,7 @@ function SlotRow({ slot, pool, onUpdate, onRemove, canRemove, layerName, norms }
       </div>
 
       {material && (
-        <div className="flex items-center gap-4 pt-1.5" style={{ borderTop: `1px solid ${THEME.borderSoft}` }}>
+        <div className="flex items-center gap-3 pt-1.5 flex-wrap" style={{ borderTop: `1px solid ${THEME.borderSoft}`, minWidth: 0 }}>
           <label className="flex items-center gap-2 flex-shrink-0">
             <span className="font-mono uppercase"
               style={{ fontSize: 9, letterSpacing: '0.1em', color: THEME.inkFaint }}>Plies</span>
@@ -390,7 +390,7 @@ function SlotRow({ slot, pool, onUpdate, onRemove, canRemove, layerName, norms }
               }}
             />
           </label>
-          <div className="flex gap-3">
+          <div className="flex gap-3 flex-shrink-0">
             {[['ρ', 'density'], ['E', 'modulus'], ['σ', 'strength'], ['T', 'tMax']].map(([sym, key]) => (
               <div key={key} className="flex flex-col items-center" style={{ minWidth: 26 }}>
                 <span className="font-mono" style={{ fontSize: 9, color: THEME.inkFaint }}>{sym}</span>
@@ -400,9 +400,9 @@ function SlotRow({ slot, pool, onUpdate, onRemove, canRemove, layerName, norms }
               </div>
             ))}
           </div>
-          <div className="flex-1" />
-          <div title={`Layer fit score for "${layerName}" (WSM, 0–100)`}>
-            <ScoreBadge score={score} />
+          <div className="flex-1" style={{ minWidth: 0 }} />
+          <div className="flex-shrink-0 ml-auto" title={`Layer fit score for "${layerName}" (WSM, 0–100)`}>
+            <ScoreBadge score={score} width={40} />
           </div>
         </div>
       )}
