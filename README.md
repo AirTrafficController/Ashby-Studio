@@ -1,4 +1,4 @@
-# Ashby Studio
+# Ashby Studio 
 
 Interactive Ashby chart and materials-selection workbench for protective-suit design across extreme environments (space, deep sea, chemical/CBRN). Built with React + d3.
 
