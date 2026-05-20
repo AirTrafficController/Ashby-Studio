@@ -5,7 +5,7 @@ import {
   Upload, Download, Eye, EyeOff, Trash2, X, Plus,
   Layers, Grid3x3, ZoomIn, ZoomOut, Maximize2, Sparkles,
   Info, Target, Settings2, Dot, ChevronDown, Zap,
-  FlaskConical, Compass, Wrench,
+  FlaskConical, Compass, Wrench, Crop,
 } from 'lucide-react';
 
 import { THEME, PALETTE } from './theme.js';
@@ -468,7 +468,7 @@ input[type="range"]::-moz-range-thumb {
 
 function AshbyChart({
   materials, showPoints, showGrid, showLabels, showFamilies,
-  indices, axisConfig, hoverId, setHoverId, focusId, setFocusId,
+  indices, filter, axisConfig, hoverId, setHoverId, focusId, setFocusId,
   onGalvanic,
 }) {
   const wrapperRef = useRef(null);
@@ -594,6 +594,32 @@ function AshbyChart({
     const path = d3.line()(pts);
     return { path, slope, label: indexLabel(indices.mode) };
   }, [indices, xScale, yScale]);
+
+  /* Active filter bounds: empty inputs disable that side. */
+  const filterBounds = useMemo(() => {
+    if (!filter || !filter.visible) return null;
+    const num = (v) => {
+      const n = parseFloat(v);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    };
+    const xMin = num(filter.xMin);
+    const xMax = num(filter.xMax);
+    const yMin = num(filter.yMin);
+    const yMax = num(filter.yMax);
+    if (xMin == null && xMax == null && yMin == null && yMax == null) return null;
+    return { xMin, xMax, yMin, yMax };
+  }, [filter]);
+
+  const isInRegion = useCallback((pts) => {
+    if (!filterBounds || !pts || !pts.length) return true;
+    const { xMin, xMax, yMin, yMax } = filterBounds;
+    return pts.some(([x, y]) =>
+      (xMin == null || x >= xMin) &&
+      (xMax == null || x <= xMax) &&
+      (yMin == null || y >= yMin) &&
+      (yMax == null || y <= yMax)
+    );
+  }, [filterBounds]);
 
   const onWrapperMouseMove = useCallback((evt) => {
     if (!wrapperRef.current) return;
@@ -732,6 +758,79 @@ function AshbyChart({
             </g>
           )}
 
+          {filterBounds && (() => {
+            const { xMin, xMax, yMin, yMax } = filterBounds;
+            const [xd0, xd1] = xScale.domain();
+            const [yd0, yd1] = yScale.domain();
+            const lineStyle = {
+              stroke: THEME.accent,
+              strokeWidth: 1.2,
+              strokeDasharray: '5 4',
+              fill: 'none',
+              opacity: 0.85,
+            };
+            const labelStyle = {
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontSize: 10,
+              fill: THEME.accent,
+              fontWeight: 500,
+            };
+            const lx = (v) => xScale(v);
+            const ly = (v) => yScale(v);
+
+            // Shaded region inside bounds for visual emphasis
+            const rx0 = xMin != null ? Math.max(0, lx(xMin)) : 0;
+            const rx1 = xMax != null ? Math.min(iw, lx(xMax)) : iw;
+            const ry0 = yMax != null ? Math.max(0, ly(yMax)) : 0;
+            const ry1 = yMin != null ? Math.min(ih, ly(yMin)) : ih;
+
+            return (
+              <g clipPath="url(#plot-clip)" style={{ pointerEvents: 'none' }}>
+                {rx1 > rx0 && ry1 > ry0 && (
+                  <rect
+                    x={rx0} y={ry0}
+                    width={Math.max(0, rx1 - rx0)}
+                    height={Math.max(0, ry1 - ry0)}
+                    fill={THEME.accent}
+                    opacity={0.05}
+                  />
+                )}
+                {xMin != null && xMin >= xd0 && xMin <= xd1 && (
+                  <>
+                    <line x1={lx(xMin)} x2={lx(xMin)} y1={0} y2={ih} style={lineStyle} />
+                    <text x={lx(xMin) + 4} y={12} style={labelStyle}>
+                      x ≥ {fmt(xMin, 3)}
+                    </text>
+                  </>
+                )}
+                {xMax != null && xMax >= xd0 && xMax <= xd1 && (
+                  <>
+                    <line x1={lx(xMax)} x2={lx(xMax)} y1={0} y2={ih} style={lineStyle} />
+                    <text x={lx(xMax) - 4} y={12} textAnchor="end" style={labelStyle}>
+                      x ≤ {fmt(xMax, 3)}
+                    </text>
+                  </>
+                )}
+                {yMin != null && yMin >= yd0 && yMin <= yd1 && (
+                  <>
+                    <line x1={0} x2={iw} y1={ly(yMin)} y2={ly(yMin)} style={lineStyle} />
+                    <text x={6} y={ly(yMin) - 4} style={labelStyle}>
+                      y ≥ {fmt(yMin, 3)}
+                    </text>
+                  </>
+                )}
+                {yMax != null && yMax >= yd0 && yMax <= yd1 && (
+                  <>
+                    <line x1={0} x2={iw} y1={ly(yMax)} y2={ly(yMax)} style={lineStyle} />
+                    <text x={6} y={ly(yMax) + 12} style={labelStyle}>
+                      y ≤ {fmt(yMax, 3)}
+                    </text>
+                  </>
+                )}
+              </g>
+            );
+          })()}
+
           {/* Super-family background regions — broad material classes
               rendered as tinted blobs underneath individual envelopes. */}
           {showFamilies && (
@@ -762,9 +861,12 @@ function AshbyChart({
                 const isHL = !!m.highlightRank;
                 const userDimmed = (focusId && focusId !== m.id) || (hoverId && hoverId !== m.id);
                 const focused = focusId === m.id || hoverId === m.id;
-                const opacity = isHL
-                  ? 1
-                  : (hasHighlight ? 0.18 : (userDimmed ? 0.18 : (focused ? 1 : 0.85)));
+                const outOfRegion = !isInRegion(m.points);
+                const opacity = outOfRegion
+                  ? 0.08
+                  : (isHL
+                    ? 1
+                    : (hasHighlight ? 0.18 : (userDimmed ? 0.18 : (focused ? 1 : 0.85))));
                 const strokeWidth = isHL
                   ? (m.highlightRank === 1 ? 3 : 2.2)
                   : (focused ? 2 : 1.2);
@@ -813,9 +915,10 @@ function AshbyChart({
             if (lx < 0 || ly < 0 || lx > iw || ly > ih) return null;
             const isHL = !!m.highlightRank;
             const userDimmed = (focusId && focusId !== m.id) || (hoverId && hoverId !== m.id);
-            const labelOpacity = isHL
-              ? 1
-              : (hasHighlight ? 0.25 : (userDimmed ? 0.35 : 1));
+            const outOfRegion = !isInRegion(m.points);
+            const labelOpacity = outOfRegion
+              ? 0.12
+              : (isHL ? 1 : (hasHighlight ? 0.25 : (userDimmed ? 0.35 : 1)));
             const name = isHL ? `#${m.highlightRank}  ${m.name}` : m.name;
             const w = Math.max(48, name.length * 6.2 + 14);
             const h = 18;
@@ -1188,6 +1291,17 @@ export default function AshbyStudio() {
     constant: 2.0,
   });
 
+  /* Narrow-down filter — vertical/horizontal cut lines.
+     Materials whose envelope falls entirely outside the region
+     are blurred so the in-region candidates stand out. */
+  const [filter, setFilter] = useState({
+    visible: false,
+    xMin: '',
+    xMax: '',
+    yMin: '',
+    yMax: '',
+  });
+
   const [aboutOpen, setAboutOpen] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
   const [galvanicOpen, setGalvanicOpen] = useState(false);
@@ -1248,7 +1362,7 @@ export default function AshbyStudio() {
       const raw = localStorage.getItem('ashby:openSections');
       if (raw) return JSON.parse(raw);
     } catch {}
-    return { materials: true, appearance: true, axes: true, perfIndex: false };
+    return { materials: true, appearance: true, axes: true, perfIndex: false, filter: false };
   });
   useEffect(() => {
     try { localStorage.setItem('ashby:openSections', JSON.stringify(openSections)); } catch {}
@@ -1697,9 +1811,8 @@ export default function AshbyStudio() {
           </div>
           )}
 
-          {/* Performance index — only useful for density vs modulus */}
-          {chartAxes.xKey === 'density' && chartAxes.yKey === 'modulus' && (
-            <>
+          {/* Performance index — iso-line y = C·x^slope, available on any axis pair */}
+          <>
               <SectionHeader
                 icon={Dot} title="Performance Index"
                 open={openSections.perfIndex}
@@ -1757,6 +1870,93 @@ export default function AshbyStudio() {
               </div>
               )}
             </>
+
+          {/* Narrow-down: vertical/horizontal filter lines */}
+          <SectionHeader
+            icon={Crop} title="Filter Region"
+            open={openSections.filter}
+            onToggle={() => toggleSection('filter')}
+          />
+          {openSections.filter && (
+            <div className="px-4 py-3 flex flex-col gap-3">
+              <label className="flex items-center gap-2.5 cursor-pointer text-sm">
+                <input type="checkbox" className="checkbox"
+                       checked={filter.visible}
+                       onChange={e => setFilter(s => ({ ...s, visible: e.target.checked }))} />
+                <span>Show filter lines</span>
+              </label>
+
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <label className="flex flex-col gap-1">
+                  <span className="font-mono text-[9px] uppercase" style={{ color: THEME.inkFaint }}>
+                    X min ({PROPERTY_META[chartAxes.xKey]?.unit ?? ''})
+                  </span>
+                  <input type="number" step="any" value={filter.xMin}
+                         placeholder="—"
+                         onChange={e => setFilter(s => ({ ...s, xMin: e.target.value }))}
+                         style={{
+                           border: `1px solid ${THEME.border}`,
+                           background: THEME.paperLight,
+                           borderRadius: 3, padding: '4px 6px',
+                         }} />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="font-mono text-[9px] uppercase" style={{ color: THEME.inkFaint }}>
+                    X max ({PROPERTY_META[chartAxes.xKey]?.unit ?? ''})
+                  </span>
+                  <input type="number" step="any" value={filter.xMax}
+                         placeholder="—"
+                         onChange={e => setFilter(s => ({ ...s, xMax: e.target.value }))}
+                         style={{
+                           border: `1px solid ${THEME.border}`,
+                           background: THEME.paperLight,
+                           borderRadius: 3, padding: '4px 6px',
+                         }} />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="font-mono text-[9px] uppercase" style={{ color: THEME.inkFaint }}>
+                    Y min ({PROPERTY_META[chartAxes.yKey]?.unit ?? ''})
+                  </span>
+                  <input type="number" step="any" value={filter.yMin}
+                         placeholder="—"
+                         onChange={e => setFilter(s => ({ ...s, yMin: e.target.value }))}
+                         style={{
+                           border: `1px solid ${THEME.border}`,
+                           background: THEME.paperLight,
+                           borderRadius: 3, padding: '4px 6px',
+                         }} />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="font-mono text-[9px] uppercase" style={{ color: THEME.inkFaint }}>
+                    Y max ({PROPERTY_META[chartAxes.yKey]?.unit ?? ''})
+                  </span>
+                  <input type="number" step="any" value={filter.yMax}
+                         placeholder="—"
+                         onChange={e => setFilter(s => ({ ...s, yMax: e.target.value }))}
+                         style={{
+                           border: `1px solid ${THEME.border}`,
+                           background: THEME.paperLight,
+                           borderRadius: 3, padding: '4px 6px',
+                         }} />
+                </label>
+              </div>
+
+              <button
+                onClick={() => setFilter({ visible: filter.visible, xMin: '', xMax: '', yMin: '', yMax: '' })}
+                className="btn justify-center"
+                style={{
+                  background: THEME.paperLight,
+                  borderColor: THEME.border,
+                  fontSize: 11, padding: '5px 6px',
+                }}
+              >
+                Clear bounds
+              </button>
+
+              <div className="font-mono text-[9px]" style={{ color: THEME.inkFaint }}>
+                candidates fully outside the region are blurred
+              </div>
+            </div>
           )}
 
           <div className="flex-1" />
@@ -1775,6 +1975,7 @@ export default function AshbyStudio() {
             showLabels={showLabels}
             showFamilies={showFamilies}
             indices={indices}
+            filter={filter}
             axisConfig={axisConfig}
             hoverId={hoverId} setHoverId={setHoverId}
             focusId={focusId} setFocusId={setFocusId}
