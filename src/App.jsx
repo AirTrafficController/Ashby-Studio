@@ -122,7 +122,8 @@ function fmt(n, digits = 3) {
   if (n === 0) return '0';
   const abs = Math.abs(n);
   if (abs >= 1000 || abs < 0.01) return n.toExponential(2);
-  return n.toPrecision(digits);
+  const safeDig = Math.max(1, Math.min(100, digits));
+  return n.toPrecision(safeDig);
 }
 
 /* ============================================================
@@ -1334,6 +1335,8 @@ export default function AshbyStudio() {
       let points;
       if (m.props) {
         points = clusterPoints(m, chartAxes.xKey, chartAxes.yKey);
+      } else if (m.props && m.points && chartAxes.xKey === 'density' && chartAxes.yKey === 'modulus') {
+        points = m.points;
       } else if (m.points && chartAxes.xKey === 'density' && chartAxes.yKey === 'modulus') {
         points = m.points;
       } else {
@@ -1862,8 +1865,8 @@ export default function AshbyStudio() {
             >
               <div style={{ color: THEME.inkMuted }}>CSV format — one file per material</div>
               <div>NAME,DENSITY,MODULUS</div>
-              <div>ABS_high_density,3.5,6.1</div>
               <div>ABS_low_density,0.882,0.778</div>
+              <div>ABS_high_density,3.5,6.1</div>
               <div>...</div>
             </div>
             <p className="text-xs" style={{ color: THEME.inkMuted, marginTop: 10 }}>
