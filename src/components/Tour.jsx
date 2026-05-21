@@ -21,14 +21,15 @@ import { THEME } from '../theme.js';
 const STEPS = [
   {
     icon: Sparkles,
-    title: 'Welcome to Ashby Studio',
+    title: 'Welcome to MSRS',
     body: (
       <>
-        A materials-selection workbench for protective-suit design. Two modes
-        you toggle in the top bar: <strong>Select</strong> runs a 4-step
-        ranking pipeline; <strong>Browse</strong> is the classical Ashby chart
-        explorer. The current set has 40 built-in materials — metals,
-        composites, ceramics, advanced textiles, elastomers.
+        The <strong>Material Selection &amp; Ranking System</strong> — a
+        workbench for protective-suit design. Two modes you toggle in the
+        top bar: <strong>Select</strong> runs a 4-step ranking pipeline;
+        <strong>Browse</strong> is the classical Ashby-style chart explorer.
+        The current set has 40 built-in materials — metals, composites,
+        ceramics, advanced textiles, elastomers.
       </>
     ),
   },

@@ -1467,7 +1467,7 @@ function buildReportHTML({ generatedAt, chartDataURL, chartAxes, axisConfig, ind
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Ashby Studio — Selection Report</title>
+<title>MSRS — Selection Report</title>
 <style>
   @page { size: A4; margin: 14mm; }
   * { box-sizing: border-box; }
@@ -1516,12 +1516,13 @@ function buildReportHTML({ generatedAt, chartDataURL, chartAxes, axisConfig, ind
   </div>
 
   <header>
-    <h1>Ashby Studio · Selection Report</h1>
+    <h1>MSRS · Selection Report</h1>
+    <div class="meta">Material Selection &amp; Ranking System</div>
     <div class="meta">Generated ${escapeHTML(date)} · ${visibleMaterials.length}/${materials.length} materials visible</div>
   </header>
 
   <section class="block">
-    <h2>1 · Ashby chart snapshot</h2>
+    <h2>1 · Chart snapshot (Ashby-style log–log)</h2>
     <p class="lead">
       Log–log envelope plot of <b>${escapeHTML(yLabel)}</b> vs <b>${escapeHTML(xLabel)}</b>.
       Each shape encloses the property range for one material family;
@@ -1895,10 +1896,10 @@ export default function AshbyStudio() {
       >
         <div className="flex items-baseline gap-3">
           <div className="font-display italic" style={{ fontSize: 22, fontWeight: 500, letterSpacing: '-0.01em' }}>
-            Ashby Studio
+            MSRS
           </div>
           <div className="font-mono uppercase" style={{ fontSize: 9, letterSpacing: '0.15em', color: THEME.inkFaint }}>
-            Suit-material selection workbench
+            Material Selection &amp; Ranking System · suit workbench
           </div>
         </div>
 
@@ -2410,12 +2411,15 @@ export default function AshbyStudio() {
               <X size={16} />
             </button>
             <div className="font-display italic mb-4" style={{ fontSize: 24 }}>
-              Ashby Studio
+              MSRS
+            </div>
+            <div className="font-mono uppercase mb-3" style={{ fontSize: 9, letterSpacing: '0.15em', color: THEME.inkMuted }}>
+              Material Selection &amp; Ranking System
             </div>
             <p className="mb-3">
               A materials-selection workbench for protective-suit design across
               extreme environments (space, deep sea, chemical/CBRN). Combines
-              an interactive Ashby chart with a four-step decision pipeline.
+              an interactive Ashby-style chart with a four-step decision pipeline.
             </p>
             <p className="mb-3">
               <span className="font-mono text-xs">Select</span> mode runs the
