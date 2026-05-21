@@ -10,6 +10,16 @@
 
 const MP_BASE = 'https://api.materialsproject.org';
 
+/* The Materials Project API does not send CORS headers, so calls from a
+   browser origin (e.g. GitHub Pages) get blocked at the preflight stage.
+   We route requests through a public CORS proxy that forwards arbitrary
+   headers — including the X-API-KEY the MP API requires. If the first
+   proxy is unreachable we fall through to the next one. */
+const CORS_PROXIES = [
+  (u) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+  (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+];
+
 const FIELDS = [
   'material_id',
   'formula_pretty',
@@ -31,7 +41,7 @@ export async function searchByFormula(formula, apiKey, { signal } = {}) {
   url.searchParams.set('_fields', FIELDS);
   url.searchParams.set('_limit', '10');
 
-  const res = await fetch(url, {
+  const res = await fetchViaProxy(url.toString(), {
     headers: { 'X-API-KEY': apiKey, Accept: 'application/json' },
     signal,
   });
@@ -46,6 +56,24 @@ export async function searchByFormula(formula, apiKey, { signal } = {}) {
     .filter((e) => Number.isFinite(e.density) && e.density > 0)
     .sort((a, b) => a.energyAboveHull - b.energyAboveHull);
   return entries;
+}
+
+async function fetchViaProxy(targetUrl, init) {
+  let lastErr = null;
+  for (const wrap of CORS_PROXIES) {
+    try {
+      const res = await fetch(wrap(targetUrl), init);
+      if (res.status >= 500 && res.status <= 599) {
+        lastErr = new Error(`Proxy returned ${res.status}`);
+        continue;
+      }
+      return res;
+    } catch (err) {
+      if (err?.name === 'AbortError') throw err;
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error('All CORS proxies failed.');
 }
 
 function parseEntry(d) {
