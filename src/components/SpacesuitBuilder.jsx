@@ -740,7 +740,7 @@ function Stat({ label, value }) {
    MAIN EXPORT
    ============================================================ */
 
-export default function SpacesuitBuilder({ materials: liveMaterials }) {
+export default function SpacesuitBuilder({ materials: liveMaterials, onSnapshot }) {
   const pool = useMemo(() => {
     const src = Array.isArray(liveMaterials) && liveMaterials.length
       ? liveMaterials
@@ -762,6 +762,39 @@ export default function SpacesuitBuilder({ materials: liveMaterials }) {
 
   const updateLayer = (id, patch) =>
     setLayers(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l));
+
+  /* Push current build state up so the report exporter can summarize
+     suit configuration and per-layer scores without owning the state. */
+  useEffect(() => {
+    if (typeof onSnapshot !== 'function') return;
+    const snap = layers.map((layer, idx) => {
+      const slots = layer.slots.map(s => {
+        const mat = s.materialId ? pool.find(m => m.id === s.materialId) : null;
+        return {
+          plies: s.plies,
+          materialId: s.materialId,
+          name: mat?.name ?? null,
+          family: mat?.family ?? null,
+          props: mat?.props ?? null,
+          score: mat ? wsmScore(mat, layer.name, norms) : null,
+        };
+      });
+      const scored = slots.filter(s => s.score != null);
+      const avgScore = scored.length
+        ? Math.round(scored.reduce((a, b) => a + b.score, 0) / scored.length)
+        : null;
+      const plies = slots.reduce((s, sl) => s + sl.plies, 0);
+      return { index: idx, name: layer.name, slots, plies, avgScore };
+    });
+    let num = 0, den = 0;
+    for (const l of snap) {
+      for (const s of l.slots) {
+        if (s.score != null) { num += s.score * s.plies; den += s.plies; }
+      }
+    }
+    const overallScore = den > 0 ? Math.round(num / den) : null;
+    onSnapshot({ layers: snap, overallScore });
+  }, [layers, pool, norms, onSnapshot]);
 
   const moveLayer = (id, dir) =>
     setLayers(prev => {

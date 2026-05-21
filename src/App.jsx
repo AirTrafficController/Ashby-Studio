@@ -5,7 +5,7 @@ import {
   Upload, Download, Eye, EyeOff, Trash2, X, Plus,
   Layers, Grid3x3, ZoomIn, ZoomOut, Maximize2, Sparkles,
   Info, Target, Settings2, Dot, ChevronDown, Zap,
-  FlaskConical, Compass, Wrench, Crop,
+  FlaskConical, Compass, Wrench, Crop, FileText,
 } from 'lucide-react';
 
 import { THEME, PALETTE } from './theme.js';
@@ -469,7 +469,7 @@ input[type="range"]::-moz-range-thumb {
 function AshbyChart({
   materials, showPoints, showGrid, showLabels, showFamilies,
   indices, filter, axisConfig, hoverId, setHoverId, focusId, setFocusId,
-  onGalvanic,
+  onGalvanic, captureRef,
 }) {
   const wrapperRef = useRef(null);
   const svgRef = useRef(null);
@@ -639,8 +639,12 @@ function AshbyChart({
   const zoomOut = () => d3.select(svgRef.current).transition().duration(200).call(zoomRef.current.scaleBy, 1 / 1.6);
   const resetView = () => d3.select(svgRef.current).transition().duration(220).call(zoomRef.current.transform, d3.zoomIdentity);
 
-  const exportPNG = () => {
+  /* Render the chart SVG to a PNG. If download=true, triggers a file
+     save; otherwise resolves with a data URL for embedding (used by
+     the PDF report exporter). */
+  const renderPNG = useCallback((download = true) => new Promise((resolve, reject) => {
     const svg = svgRef.current;
+    if (!svg) { resolve(null); return; }
     const clone = svg.cloneNode(true);
     clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
 
@@ -688,16 +692,33 @@ function AshbyChart({
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.scale(scale, scale);
       ctx.drawImage(img, 0, 0);
-      canvas.toBlob(b => {
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(b);
-        a.download = 'ashby-chart.png';
-        a.click();
+      if (download) {
+        canvas.toBlob(b => {
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(b);
+          a.download = 'ashby-chart.png';
+          a.click();
+          URL.revokeObjectURL(url);
+          resolve(null);
+        }, 'image/png');
+      } else {
+        const dataURL = canvas.toDataURL('image/png');
         URL.revokeObjectURL(url);
-      }, 'image/png');
+        resolve(dataURL);
+      }
     };
+    img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
     img.src = url;
-  };
+  }), [size.w, size.h]);
+
+  const exportPNG = useCallback(() => { renderPNG(true); }, [renderPNG]);
+
+  /* Expose the snapshot function to the parent so the report
+     exporter can embed the current chart view. */
+  useEffect(() => {
+    if (captureRef) captureRef.current = () => renderPNG(false);
+    return () => { if (captureRef) captureRef.current = null; };
+  }, [captureRef, renderPNG]);
 
   return (
     <div
@@ -1256,6 +1277,303 @@ function SectionHeader({ icon: Icon, title, right, open, onToggle }) {
 }
 
 /* ============================================================
+   REPORT BUILDER — assembles a print-ready HTML document that the
+   user saves as PDF via the browser's print dialog. Snapshots of
+   the chart, AHP weights, TOPSIS ranking, Pugh matrix, and suit
+   build are inlined; everything is self-contained.
+   ============================================================ */
+
+function escapeHTML(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+function fmtNum(n, d = 3) {
+  if (!Number.isFinite(n)) return '—';
+  if (Math.abs(n) >= 1000) return n.toFixed(0);
+  if (Math.abs(n) >= 10)   return n.toFixed(1);
+  return n.toFixed(d);
+}
+
+function buildReportHTML({ generatedAt, chartDataURL, chartAxes, axisConfig, indices, filter, materials, wizard, build }) {
+  const date = generatedAt.toLocaleString();
+  const xLabel = PROPERTY_META[chartAxes.xKey]?.label ?? chartAxes.xKey;
+  const yLabel = PROPERTY_META[chartAxes.yKey]?.label ?? chartAxes.yKey;
+  const xUnit  = PROPERTY_META[chartAxes.xKey]?.unit ?? '';
+  const yUnit  = PROPERTY_META[chartAxes.yKey]?.unit ?? '';
+
+  const visibleMaterials = materials.filter(m => m.visible);
+
+  // --- Filters / Indices block
+  const filterRows = [];
+  if (filter?.visible) {
+    if (filter.xMin) filterRows.push([`${xLabel} ≥`, `${filter.xMin} ${xUnit}`]);
+    if (filter.xMax) filterRows.push([`${xLabel} ≤`, `${filter.xMax} ${xUnit}`]);
+    if (filter.yMin) filterRows.push([`${yLabel} ≥`, `${filter.yMin} ${yUnit}`]);
+    if (filter.yMax) filterRows.push([`${yLabel} ≤`, `${filter.yMax} ${yUnit}`]);
+  }
+  if (indices?.visible) {
+    filterRows.push(['Performance index', `${indexLabel(indices.mode)} = ${fmtNum(indices.constant)}`]);
+  }
+
+  const wiz = wizard;
+  const bld = build;
+
+  const wizardSection = wiz ? `
+    <section class="block">
+      <h2>2 · Selection pipeline (AHP → TOPSIS → Pugh)</h2>
+      <p class="lead">
+        Materials are filtered to the chosen environment and layer role,
+        then ranked by a weighted multi-criteria scheme. Weights are derived
+        from the user's pairwise comparisons via the Analytic Hierarchy
+        Process (AHP). The eigenvector of the comparison matrix gives
+        criterion weights; consistency is checked against Saaty's CR
+        threshold (CR &lt; 0.10 = acceptable). TOPSIS then ranks each
+        candidate by relative closeness to an ideal-best/ideal-worst
+        synthetic alternative built from the weighted, normalized
+        decision matrix. The Pugh matrix validates the top pick against
+        a baseline on a +/0/− scale per criterion.
+      </p>
+
+      <h3>Filter spec</h3>
+      <table class="kv">
+        <tr><th>Environment</th><td>${escapeHTML(wiz.environment)}</td></tr>
+        <tr><th>Layer role</th><td>${escapeHTML(wiz.layer)}</td></tr>
+        <tr><th>Morphology</th><td>${escapeHTML(wiz.filters?.morphology ?? 'any')}</td></tr>
+        <tr><th>T_max floor</th><td>${wiz.filters?.tMax || '—'} °C</td></tr>
+        <tr><th>Cost ceiling</th><td>${wiz.filters?.maxCost ?? '—'} / 4</td></tr>
+        <tr><th>Chem-res floor</th><td>${wiz.filters?.minChemRes ?? '—'} / 4</td></tr>
+        <tr><th>Layer-membership filter</th><td>${wiz.filters?.useLayerFilter ? 'on' : 'off'}</td></tr>
+        <tr><th>Surviving candidates</th><td>${wiz.candidateCount}</td></tr>
+      </table>
+
+      <h3>AHP criterion weights</h3>
+      <p class="hint">
+        Consistency ratio CR = <b>${fmtNum(wiz.consistencyRatio, 3)}</b>
+        ${wiz.consistencyRatio < 0.10 ? '<span class="ok">(consistent)</span>' : '<span class="warn">(revisit pairwise judgements)</span>'}
+      </p>
+      <table class="grid">
+        <thead><tr><th>Criterion</th><th>Direction</th><th>Weight</th><th>Bar</th></tr></thead>
+        <tbody>
+          ${wiz.criteria.map((c, i) => {
+            const w = wiz.weights[i] ?? 0;
+            return `<tr>
+              <td>${escapeHTML(c.label)}</td>
+              <td>${c.beneficial ? 'maximize' : 'minimize'}</td>
+              <td class="num">${(w * 100).toFixed(1)}%</td>
+              <td><div class="bar"><div class="bar-fill" style="width:${(w * 100).toFixed(1)}%"></div></div></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+
+      <h3>TOPSIS ranking — top ${wiz.ranking.length}</h3>
+      <p class="hint">
+        Score = D⁻ / (D⁺ + D⁻), where D⁺ and D⁻ are Euclidean distances
+        from the weighted-normalized alternative to the ideal-best and
+        ideal-worst points respectively. Higher is better; 1.0 = ideal.
+      </p>
+      <table class="grid">
+        <thead><tr><th>Rank</th><th>Material</th><th>Family</th><th>D⁺</th><th>D⁻</th><th>Score</th></tr></thead>
+        <tbody>
+          ${wiz.ranking.map((r, i) => `
+            <tr${i < 3 ? ' class="rank-top"' : ''}>
+              <td class="num">${i + 1}</td>
+              <td>${escapeHTML(r.name)}</td>
+              <td class="muted">${escapeHTML(r.family ?? '')}</td>
+              <td class="num">${fmtNum(r.dPlus)}</td>
+              <td class="num">${fmtNum(r.dMinus)}</td>
+              <td class="num"><b>${fmtNum(r.score)}</b></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+
+      ${wiz.pugh && wiz.pugh.length ? `
+        <h3>Pugh validation — baseline: ${escapeHTML(wiz.baselineName ?? '—')}</h3>
+        <p class="hint">
+          Each candidate is compared cell-by-cell against the baseline:
+          +1 better, 0 same (within 5% tolerance), −1 worse. The weighted
+          total uses the AHP weights above.
+        </p>
+        <table class="grid">
+          <thead><tr><th>Candidate</th>
+            ${wiz.criteria.map(c => `<th>${escapeHTML(c.label)}</th>`).join('')}
+            <th>+</th><th>0</th><th>−</th><th>Weighted Σ</th>
+          </tr></thead>
+          <tbody>
+            ${wiz.pugh.map(row => `
+              <tr>
+                <td>${escapeHTML(row.name)}</td>
+                ${row.cells.map(cell => `<td class="pugh-cell pugh-${cell.score > 0 ? 'plus' : cell.score < 0 ? 'minus' : 'same'}">${cell.score > 0 ? '+' : cell.score < 0 ? '−' : '0'}</td>`).join('')}
+                <td class="num">${row.plus}</td>
+                <td class="num">${row.same}</td>
+                <td class="num">${row.minus}</td>
+                <td class="num"><b>${row.weighted >= 0 ? '+' : ''}${fmtNum(row.weighted)}</b></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      ` : ''}
+    </section>
+  ` : '';
+
+  const buildSection = bld && bld.layers && bld.layers.length ? `
+    <section class="block">
+      <h2>3 · Suit build configuration</h2>
+      <p class="lead">
+        Per-layer material assignment from outer to inner, with ply counts
+        and Weighted-Sum-Model fit scores. WSM normalizes each property
+        against the pool's [min, max] range; weights default to a per-layer
+        preset (Outer Shell, Thermal Insulation, Pressure Bladder, Inner
+        Liner) and fall back to even weighting otherwise. Overall score is
+        ply-weighted across all configured layers.
+      </p>
+      <table class="kv">
+        <tr><th>Layers</th><td>${bld.layers.length}</td></tr>
+        <tr><th>Configured layers</th><td>${bld.layers.filter(l => l.slots.some(s => s.materialId)).length}</td></tr>
+        <tr><th>Total plies</th><td>${bld.layers.reduce((s, l) => s + l.plies, 0)}</td></tr>
+        <tr><th>Overall suit score</th><td><b>${bld.overallScore ?? '—'}</b> / 100</td></tr>
+      </table>
+
+      <table class="grid">
+        <thead><tr><th>#</th><th>Layer / Material</th><th>Family</th><th>Plies</th><th>ρ g/cc</th><th>E GPa</th><th>σ MPa</th><th>T_max °C</th><th>Score</th></tr></thead>
+        <tbody>
+          ${bld.layers.flatMap((layer) => {
+            if (!layer.slots.length) {
+              return [`<tr class="layer-head"><td class="num">${layer.index + 1}</td><td colspan="7"><b>${escapeHTML(layer.name)}</b> <span class="muted">— empty</span></td><td>—</td></tr>`];
+            }
+            return layer.slots.map((s, si) => `
+              <tr${si === 0 ? ' class="layer-head"' : ''}>
+                <td class="num">${si === 0 ? layer.index + 1 : ''}</td>
+                <td>${si === 0 ? `<b>${escapeHTML(layer.name)}</b><br/>` : ''}${escapeHTML(s.name ?? '—')}</td>
+                <td class="muted">${escapeHTML(s.family ?? '—')}</td>
+                <td class="num">${s.plies}</td>
+                <td class="num">${s.props ? fmtNum(s.props.density, 2) : '—'}</td>
+                <td class="num">${s.props ? fmtNum(s.props.modulus, 2) : '—'}</td>
+                <td class="num">${s.props ? fmtNum(s.props.strength, 0) : '—'}</td>
+                <td class="num">${s.props ? fmtNum(s.props.tMax, 0) : '—'}</td>
+                <td class="num">${s.score ?? '—'}</td>
+              </tr>
+            `);
+          }).join('')}
+        </tbody>
+      </table>
+    </section>
+  ` : '';
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Ashby Studio — Selection Report</title>
+<style>
+  @page { size: A4; margin: 14mm; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #faf7f0; color: #1c1917;
+    font-family: 'IBM Plex Sans', -apple-system, system-ui, sans-serif; font-size: 11pt; line-height: 1.45; }
+  body { padding: 24px; }
+  h1 { font-family: 'Times New Roman', Georgia, serif; font-style: italic; font-weight: 500; font-size: 28pt; margin: 0 0 4px; letter-spacing: -0.01em; }
+  h2 { font-size: 14pt; margin: 24px 0 8px; padding-bottom: 4px; border-bottom: 1px solid #1c1917; }
+  h3 { font-size: 11pt; margin: 14px 0 6px; text-transform: uppercase; letter-spacing: 0.08em; color: #44403c; }
+  p { margin: 6px 0; }
+  p.lead { color: #44403c; font-size: 10.5pt; }
+  p.hint { color: #78716c; font-size: 9.5pt; font-style: italic; }
+  .muted { color: #78716c; }
+  .ok { color: #16a34a; font-weight: 600; }
+  .warn { color: #c2410c; font-weight: 600; }
+  .meta { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 9pt; color: #78716c; letter-spacing: 0.05em; text-transform: uppercase; }
+  .toolbar { position: fixed; top: 10px; right: 10px; display: flex; gap: 6px; }
+  .toolbar button { font: inherit; font-size: 10pt; padding: 6px 12px; border: 1px solid #1c1917; background: #1c1917; color: #faf7f0; cursor: pointer; border-radius: 3px; }
+  .toolbar button.ghost { background: transparent; color: #1c1917; }
+  @media print { .toolbar { display: none; } body { background: white; } }
+  .block { page-break-inside: avoid; margin-top: 18px; }
+  .chart-wrap { border: 1px solid #d6d3d1; background: white; padding: 6px; text-align: center; }
+  .chart-wrap img { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+  table { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: 10pt; }
+  table.kv { width: auto; min-width: 60%; }
+  table.kv th { text-align: left; padding: 3px 14px 3px 0; font-weight: 500; color: #57534e; width: 30%; font-size: 9.5pt; }
+  table.kv td { padding: 3px 0; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 9.5pt; }
+  table.grid th, table.grid td { border: 1px solid #e7e5e4; padding: 5px 7px; }
+  table.grid thead th { background: #f5f5f4; text-transform: uppercase; letter-spacing: 0.05em; font-size: 8.5pt; color: #57534e; }
+  table.grid td.num { font-family: 'IBM Plex Mono', ui-monospace, monospace; text-align: right; }
+  tr.rank-top { background: #fef3e2; }
+  tr.layer-head td { border-top: 1.5px solid #1c1917; }
+  .bar { background: #e7e5e4; height: 6px; border-radius: 3px; overflow: hidden; width: 100%; min-width: 80px; }
+  .bar-fill { background: #1c1917; height: 100%; }
+  .pugh-cell { text-align: center; font-weight: 600; font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+  .pugh-plus { background: #dcfce7; color: #166534; }
+  .pugh-minus { background: #fee2e2; color: #991b1b; }
+  .pugh-same { color: #78716c; }
+  footer { margin-top: 28px; padding-top: 10px; border-top: 1px solid #d6d3d1; font-size: 9pt; color: #78716c; }
+</style>
+</head>
+<body>
+  <div class="toolbar">
+    <button onclick="window.print()">Save as PDF / Print</button>
+    <button class="ghost" onclick="window.close()">Close</button>
+  </div>
+
+  <header>
+    <h1>Ashby Studio · Selection Report</h1>
+    <div class="meta">Generated ${escapeHTML(date)} · ${visibleMaterials.length}/${materials.length} materials visible</div>
+  </header>
+
+  <section class="block">
+    <h2>1 · Ashby chart snapshot</h2>
+    <p class="lead">
+      Log–log envelope plot of <b>${escapeHTML(yLabel)}</b> vs <b>${escapeHTML(xLabel)}</b>.
+      Each shape encloses the property range for one material family;
+      tinted regions group materials by super-family.
+      ${filter?.visible ? 'Dashed lines mark the active filter region — candidates fully outside are blurred.' : ''}
+      ${indices?.visible ? `The accent iso-line ${indexLabel(indices.mode)} = ${fmtNum(indices.constant)} highlights the minimum-mass direction.` : ''}
+    </p>
+    <div class="chart-wrap">
+      ${chartDataURL
+        ? `<img src="${chartDataURL}" alt="Ashby chart" />`
+        : '<p class="hint" style="padding:40px">Chart snapshot unavailable — make sure the chart area was visible when generating the report.</p>'}
+    </div>
+    ${filterRows.length ? `
+      <h3>Active chart constraints</h3>
+      <table class="kv">
+        ${filterRows.map(([k, v]) => `<tr><th>${escapeHTML(k)}</th><td>${escapeHTML(v)}</td></tr>`).join('')}
+      </table>
+    ` : ''}
+  </section>
+
+  ${wizardSection}
+
+  ${buildSection}
+
+  <footer>
+    <p>
+      <b>Methodology.</b> AHP weights are the principal eigenvector of the
+      pairwise comparison matrix; CR compares the observed consistency
+      index to Saaty's random-matrix index for the same size. TOPSIS
+      operates on the vector-normalized, weight-scaled decision matrix.
+      WSM fit scores in the build section normalize each criterion to
+      the visible pool's range (0–100) and apply per-layer preset weights.
+      Numerical material values are nominal, order-of-magnitude only —
+      verify against data sheets before committing to a design.
+    </p>
+  </footer>
+
+  <script>
+    // Auto-open the print dialog once the chart image has decoded
+    // (or immediately, if no chart was embedded).
+    window.addEventListener('load', () => {
+      const img = document.querySelector('.chart-wrap img');
+      const fire = () => setTimeout(() => window.print(), 250);
+      if (img && !img.complete) img.addEventListener('load', fire);
+      else fire();
+    });
+  </script>
+</body>
+</html>`;
+}
+
+/* ============================================================
    MAIN COMPONENT
    ============================================================ */
 
@@ -1301,6 +1619,43 @@ export default function AshbyStudio() {
     yMin: '',
     yMax: '',
   });
+
+  /* Snapshots from the wizard + builder, captured via callbacks so
+     the report exporter can summarize state owned by those panels. */
+  const [wizardSnapshot, setWizardSnapshot] = useState(null);
+  const [builderSnapshot, setBuilderSnapshot] = useState(null);
+  const chartCaptureRef = useRef(null);
+
+  /* Build a self-contained HTML report and open it in a new window
+     with print-on-load. Browsers' print dialog supports "Save as PDF"
+     so we avoid pulling in a heavy PDF library. */
+  const exportReport = useCallback(async () => {
+    let chartDataURL = null;
+    try {
+      if (chartCaptureRef.current) chartDataURL = await chartCaptureRef.current();
+    } catch (e) { console.warn('chart capture failed', e); }
+
+    const html = buildReportHTML({
+      generatedAt: new Date(),
+      chartDataURL,
+      chartAxes,
+      axisConfig,
+      indices,
+      filter,
+      materials,
+      wizard: wizardSnapshot,
+      build: builderSnapshot,
+    });
+
+    const w = window.open('', '_blank');
+    if (!w) {
+      alert('Pop-up blocked — please allow pop-ups for this site to export the report.');
+      return;
+    }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+  }, [chartAxes, axisConfig, indices, filter, materials, wizardSnapshot, builderSnapshot]);
 
   const [aboutOpen, setAboutOpen] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
@@ -1584,6 +1939,18 @@ export default function AshbyStudio() {
           <span className="font-mono text-[10px]" style={{ color: THEME.inkFaint }}>
             {materials.filter(m => m.visible).length}/{materials.length} visible
           </span>
+          <button
+            className="btn"
+            onClick={exportReport}
+            title="Export PDF report (chart + ranking + suit build)"
+            style={{
+              background: THEME.ink, color: THEME.paperLight,
+              borderColor: THEME.ink, fontSize: 11, gap: 6,
+            }}
+          >
+            <FileText size={12} />
+            Report
+          </button>
           <button className="btn btn-ghost" onClick={() => setAboutOpen(true)} title="About">
             <Info size={14} />
           </button>
@@ -1594,7 +1961,7 @@ export default function AshbyStudio() {
 
         {/* Build mode — full-width spacesuit builder */}
         {mode === 'build' && (
-          <SpacesuitBuilder materials={materials} />
+          <SpacesuitBuilder materials={materials} onSnapshot={setBuilderSnapshot} />
         )}
 
         {/* Left sidebar — hidden in build mode */}
@@ -1977,6 +2344,7 @@ export default function AshbyStudio() {
             indices={indices}
             filter={filter}
             axisConfig={axisConfig}
+            captureRef={chartCaptureRef}
             hoverId={hoverId} setHoverId={setHoverId}
             focusId={focusId} setFocusId={setFocusId}
             onGalvanic={() => setGalvanicOpen(true)}
@@ -1991,6 +2359,7 @@ export default function AshbyStudio() {
           setWidth={setRightWidth}
           onHighlight={setHighlightedIds}
           onAxisRequest={onAxisRequest}
+          onSnapshot={setWizardSnapshot}
           hidden={mode !== 'select'}
         />
       </div>
