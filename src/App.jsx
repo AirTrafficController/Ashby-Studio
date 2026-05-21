@@ -270,6 +270,95 @@ function parsePropertyCSV(text) {
 }
 
 /* ============================================================
+   PROPERTY-SPEC JSON PARSING
+   ============================================================
+   Accepts either a top-level array of material objects or a
+   { "materials": [...] } wrapper. Each object uses the same
+   property keys as the CSV (case-insensitive, alternates per
+   COLUMN_ALIASES). All parsing happens locally — the imported
+   bytes are never sent anywhere; the FileReader API and JSON.parse
+   are both pure browser primitives.
+   ============================================================ */
+
+function normaliseJSONKey(k) {
+  return String(k).trim().toLowerCase().replace(/[\s\-]/g, '_');
+}
+
+function resolveAliasedKey(obj, stdKey) {
+  const aliases = COLUMN_ALIASES[stdKey] || [];
+  const flat = {};
+  for (const k of Object.keys(obj)) flat[normaliseJSONKey(k)] = obj[k];
+  for (const a of aliases) {
+    if (a in flat && flat[a] !== undefined && flat[a] !== null && flat[a] !== '') return flat[a];
+  }
+  return undefined;
+}
+
+function parsePropertyJSON(text) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    return { materials: [], errors: [`Invalid JSON: ${e.message}`] };
+  }
+  let items = null;
+  if (Array.isArray(parsed)) items = parsed;
+  else if (parsed && Array.isArray(parsed.materials)) items = parsed.materials;
+  else return { materials: [], errors: ['JSON must be an array or have a "materials" array.'] };
+
+  const num = (v) => {
+    if (v === undefined || v === null || v === '') return null;
+    const n = typeof v === 'number' ? v : parseFloat(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const listOf = (v) => {
+    if (Array.isArray(v)) return v.map(x => String(x).trim()).filter(Boolean);
+    if (typeof v === 'string') return v.split(/[;|,]/).map(x => x.trim()).filter(Boolean);
+    return [];
+  };
+
+  const materials = [];
+  const errors = [];
+  items.forEach((raw, i) => {
+    if (!raw || typeof raw !== 'object') {
+      errors.push(`Item ${i + 1}: not an object.`);
+      return;
+    }
+    const name = String(resolveAliasedKey(raw, 'name') ?? '').trim();
+    if (!name) { errors.push(`Item ${i + 1}: missing "name".`); return; }
+
+    const props = {
+      density:  num(resolveAliasedKey(raw, 'density')),
+      modulus:  num(resolveAliasedKey(raw, 'modulus')),
+      strength: num(resolveAliasedKey(raw, 'strength')),
+      tMax:     num(resolveAliasedKey(raw, 'tMax')),
+      cost:     num(resolveAliasedKey(raw, 'cost'))    ?? 2,
+      chemRes:  num(resolveAliasedKey(raw, 'chemRes')) ?? 2,
+    };
+    const missing = ['density', 'modulus', 'strength', 'tMax']
+      .filter(k => !Number.isFinite(props[k]) || props[k] <= 0);
+    if (missing.length) {
+      errors.push(`Item ${i + 1} (${name}): missing or invalid ${missing.join(', ')}.`);
+      return;
+    }
+
+    materials.push({
+      id: `json-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 5)}`,
+      name,
+      family: String(resolveAliasedKey(raw, 'family') ?? 'Custom').trim() || 'Custom',
+      environments: listOf(resolveAliasedKey(raw, 'environments')).length
+        ? listOf(resolveAliasedKey(raw, 'environments')) : ['space'],
+      layers: listOf(resolveAliasedKey(raw, 'layers')).length
+        ? listOf(resolveAliasedKey(raw, 'layers')) : ['outer_shell'],
+      props,
+      notes: String(resolveAliasedKey(raw, 'notes') ?? '').trim(),
+    });
+  });
+
+  return { materials, errors };
+}
+
+/* ============================================================
    INITIAL MATERIAL SET — derived from the suit-materials database
    ============================================================ */
 
@@ -1975,17 +2064,34 @@ export default function AshbyStudio() {
     w.document.close();
   }, [chartAxes, axisConfig, indices, filter, paretoData, materials, wizardSnapshot, builderSnapshot]);
 
-  /* File handling — accepts both legacy scatter CSVs (one file =
-     one material's measured points) and property-spec CSVs (one
-     row = one full material with properties). The latter participate
-     in the selection pipeline. */
+  /* File handling — accepts CSV (scatter or property-spec) and JSON
+     (property-spec). All parsing is local: file bytes are read via
+     file.text(), pushed through JSON.parse / PapaParse, and dropped
+     into React state. No network calls are made, so proprietary
+     material data never leaves the browser. */
   const handleFiles = async (files) => {
     let nextColor = materials.length;
     const additions = [];
     const errors = [];
     for (const file of files) {
       const text = await file.text();
-      // Sniff: peek at the first non-empty row's headers
+      const lower = file.name.toLowerCase();
+      const isJSON = lower.endsWith('.json') || (text.trim().startsWith('{') || text.trim().startsWith('['));
+      if (isJSON) {
+        const { materials: parsed, errors: jErrs } = parsePropertyJSON(text);
+        for (const m of parsed) {
+          additions.push({
+            ...m,
+            color: PALETTE[nextColor % PALETTE.length],
+            visible: true,
+            isUserCustom: true,
+          });
+          nextColor++;
+        }
+        for (const e of jErrs) errors.push(`${file.name}: ${e}`);
+        continue;
+      }
+      // Sniff CSV: peek at the first non-empty row's headers
       const peek = Papa.parse(text.trim(), { skipEmptyLines: true, preview: 1 });
       const headerRow = peek.data?.[0];
       if (looksLikePropertySpec(headerRow)) {
@@ -2025,9 +2131,40 @@ export default function AshbyStudio() {
 
   const onDrop = (e) => {
     e.preventDefault(); setDragActive(false);
-    const files = Array.from(e.dataTransfer.files).filter(f => f.name.endsWith('.csv'));
+    const files = Array.from(e.dataTransfer.files).filter(f => /\.(csv|json)$/i.test(f.name));
     if (files.length) handleFiles(files);
   };
+
+  /* Export the current library as JSON. Mirrors the import schema
+     so users can save a working set, edit offline, and reload it.
+     Bytes flow file→ blob → user-triggered download — no server. */
+  const exportLibraryJSON = useCallback(() => {
+    const out = {
+      generatedAt: new Date().toISOString(),
+      schema: 'msrs-materials/v1',
+      materials: materials
+        .filter(m => m.props)
+        .map(m => ({
+          name: m.name,
+          family: m.family,
+          environments: m.environments,
+          layers: m.layers,
+          density: m.props.density,
+          modulus: m.props.modulus,
+          strength: m.props.strength,
+          tMax: m.props.tMax,
+          cost: m.props.cost,
+          chemRes: m.props.chemRes,
+          notes: m.notes || undefined,
+        })),
+    };
+    const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `msrs-library-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }, [materials]);
 
   const clearAll = () => { setMaterials([]); setFocusId(null); setHoverId(null); };
   const resetSamples = () => setMaterials(buildInitialMaterials());
@@ -2191,13 +2328,13 @@ export default function AshbyStudio() {
             >
               <Upload size={16} style={{ color: THEME.inkMuted, margin: '0 auto 6px' }} />
               <div className="font-body text-xs" style={{ color: THEME.ink }}>
-                Drop CSV here
+                Drop CSV or JSON here
               </div>
               <div className="font-mono text-[10px] mt-1" style={{ color: THEME.inkFaint }}>
                 scatter points or full property spec
               </div>
               <input
-                ref={fileInputRef} type="file" accept=".csv" multiple
+                ref={fileInputRef} type="file" accept=".csv,.json,application/json,text/csv" multiple
                 style={{ display: 'none' }}
                 onChange={(e) => {
                   const f = Array.from(e.target.files || []);
@@ -2205,6 +2342,14 @@ export default function AshbyStudio() {
                   e.target.value = '';
                 }}
               />
+            </div>
+            <div
+              className="font-mono text-[9px] leading-snug px-1"
+              style={{ color: THEME.inkFaint }}
+              title="MSRS is a static site — no backend, no database, no telemetry. Imported files stay in this browser session only."
+            >
+              <span style={{ color: THEME.ink, fontWeight: 600 }}>Privacy:</span>{' '}
+              files are parsed locally in this browser. Nothing is uploaded.
             </div>
 
             {csvErrors.length > 0 && (
@@ -2244,14 +2389,24 @@ export default function AshbyStudio() {
               </button>
             </div>
 
-            <button
-              className="btn btn-ghost"
-              style={{ fontSize: 10, justifyContent: 'center' }}
-              onClick={downloadTemplate}
-              title="Download CSV template for property-spec uploads"
-            >
-              <Download size={11} /> CSV spec template
-            </button>
+            <div className="flex gap-1">
+              <button
+                className="btn btn-ghost flex-1"
+                style={{ fontSize: 10, justifyContent: 'center' }}
+                onClick={downloadTemplate}
+                title="Download CSV template for property-spec uploads"
+              >
+                <Download size={11} /> CSV template
+              </button>
+              <button
+                className="btn btn-ghost flex-1"
+                style={{ fontSize: 10, justifyContent: 'center' }}
+                onClick={exportLibraryJSON}
+                title="Save current material library as JSON (round-trip with the import)"
+              >
+                <Download size={11} /> Export JSON
+              </button>
+            </div>
           </div>
           </>
           )}
@@ -2676,7 +2831,19 @@ export default function AshbyStudio() {
             <p className="mb-3">
               <span className="font-mono text-xs">Browse</span> mode is the
               classical Ashby viewer: log-log envelopes, performance-index guide
-              lines for minimum-mass design, and CSV upload for your own data.
+              lines for minimum-mass design, and CSV/JSON upload for your own data.
+            </p>
+            <p className="mb-3" style={{ fontSize: 12, color: THEME.inkMuted }}>
+              <b style={{ color: THEME.ink }}>Privacy.</b> MSRS is a fully
+              static single-page app served from GitHub Pages. There is no
+              backend and no database — every import is parsed in your
+              browser with the local <span className="font-mono text-xs">FileReader</span>{' '}
+              and <span className="font-mono text-xs">JSON.parse</span>{' '}
+              primitives, then held in React state. Nothing is uploaded,
+              logged, or persisted server-side, so proprietary datasets
+              remain strictly within your session. Use{' '}
+              <span className="font-mono text-xs">Export JSON</span> in the
+              left sidebar to save a snapshot to your own disk.
             </p>
             <div
               className="font-mono text-[11px] p-2 mt-4 mb-1"
@@ -2687,6 +2854,14 @@ export default function AshbyStudio() {
               <div>ABS_low_density,0.882,0.778</div>
               <div>ABS_high_density,3.5,6.1</div>
               <div>...</div>
+            </div>
+            <div
+              className="font-mono text-[11px] p-2 mt-2 mb-1"
+              style={{ background: THEME.paperDark, border: `1px solid ${THEME.border}` }}
+            >
+              <div style={{ color: THEME.inkMuted }}>JSON format — array of property objects</div>
+              <div>{`[{ "name": "MyAlloy", "density": 4.43, "modulus": 113,`}</div>
+              <div>{`   "strength": 950, "tMax": 600, "cost": 3 }]`}</div>
             </div>
             <p className="text-xs" style={{ color: THEME.inkMuted, marginTop: 10 }}>
               Filename becomes the material name. Numerical values in the
