@@ -15,6 +15,20 @@ import {
 import SelectionWizard from './components/SelectionWizard.jsx';
 import CustomMaterialModal from './components/CustomMaterialModal.jsx';
 import SpacesuitBuilder from './components/SpacesuitBuilder.jsx';
+
+/* ============================================================
+   BUNDLED MATERIALS PROJECT API KEY
+   ============================================================
+   This key is shipped in the static bundle so first-time visitors
+   can use the "Quick fill" lookup without any setup. Because MSRS
+   is served from GitHub Pages, *anything* in this constant is
+   publicly extractable from the deployed JS — treat it as a low-
+   trust demo key, not a production secret.
+
+   ROTATE if the per-key quota gets abused. Users with their own
+   key can override this in the sidebar (right under the materials
+   list) — their entry is saved in localStorage and takes priority. */
+const DEFAULT_MP_API_KEY = 'M1FI87QRt1KLnpHqTECgCdoy2bOrt4OS';
 import ResizeHandle from './components/ResizeHandle.jsx';
 import CompatibilityMatrix from './components/CompatibilityMatrix.jsx';
 import Tour from './components/Tour.jsx';
@@ -1806,14 +1820,20 @@ export default function AshbyStudio() {
   const [csvErrors, setCsvErrors] = useState([]);
   const fileInputRef = useRef(null);
 
-  /* Materials Project API key — persisted in localStorage so
-     users only enter it once. Empty string means no key set. */
-  const [mpApiKey, setMpApiKey] = useState(() => {
+  /* Materials Project API key.
+     A user-entered key (saved to localStorage) always takes priority;
+     otherwise we fall back to the bundled DEFAULT_MP_API_KEY so the
+     "Quick fill" lookup works out of the box. `userMpKey` is the
+     user's saved override ('' = none); `mpApiKey` is the effective
+     key passed downstream. */
+  const [userMpKey, setUserMpKey] = useState(() => {
     try { return localStorage.getItem('ashby:mpApiKey') || ''; } catch { return ''; }
   });
   useEffect(() => {
-    try { localStorage.setItem('ashby:mpApiKey', mpApiKey); } catch {}
-  }, [mpApiKey]);
+    try { localStorage.setItem('ashby:mpApiKey', userMpKey); } catch {}
+  }, [userMpKey]);
+  const mpApiKey = userMpKey || DEFAULT_MP_API_KEY;
+  const mpKeySource = userMpKey ? 'user' : 'default';
 
   /* First-launch tour: open automatically if the user has never
      dismissed it. Replay-able from the About modal. */
@@ -2352,6 +2372,67 @@ export default function AshbyStudio() {
               files are parsed locally in this browser. Nothing is uploaded.
             </div>
 
+            {/* Materials Project key — inline override so users can paste
+                their own key without digging into the About dialog. */}
+            <div
+              className="flex flex-col gap-1 px-1 pt-2"
+              style={{ borderTop: `1px dashed ${THEME.borderSoft}` }}
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-mono uppercase"
+                      style={{ fontSize: 9, letterSpacing: '0.08em', color: THEME.inkFaint }}>
+                  Materials Project key
+                </span>
+                <span
+                  className="font-mono"
+                  style={{
+                    fontSize: 8.5,
+                    padding: '1.5px 5px',
+                    borderRadius: 8,
+                    background: mpKeySource === 'user' ? THEME.ink : THEME.paperDark,
+                    color: mpKeySource === 'user' ? THEME.paperLight : THEME.inkMuted,
+                    border: `1px solid ${THEME.border}`,
+                    letterSpacing: '0.05em',
+                  }}
+                  title={mpKeySource === 'user'
+                    ? 'Using your saved key (localStorage).'
+                    : 'Using the bundled demo key. Paste your own to override.'}
+                >
+                  {mpKeySource === 'user' ? 'YOURS' : 'BUNDLED'}
+                </span>
+              </div>
+              <input
+                type="password"
+                value={userMpKey}
+                onChange={(e) => setUserMpKey(e.target.value)}
+                placeholder="paste to override bundled key"
+                className="font-mono w-full"
+                style={{
+                  fontSize: 11,
+                  padding: '4px 6px',
+                  border: `1px solid ${THEME.border}`,
+                  background: THEME.paperLight,
+                  color: THEME.ink,
+                  borderRadius: 3,
+                  outline: 'none',
+                }}
+              />
+              {userMpKey && (
+                <button
+                  onClick={() => setUserMpKey('')}
+                  className="btn btn-ghost self-start"
+                  style={{ fontSize: 9.5, padding: '2px 6px' }}
+                  title="Remove your saved key and revert to the bundled demo key"
+                >
+                  <X size={10} /> use bundled
+                </button>
+              )}
+              <div className="font-mono text-[9px] leading-snug" style={{ color: THEME.inkFaint }}>
+                stored in this browser only · enables "Quick fill" in{' '}
+                <span style={{ color: THEME.ink }}>Add custom material</span>
+              </div>
+            </div>
+
             {csvErrors.length > 0 && (
               <div
                 className="font-mono text-[10px] px-2 py-1.5"
@@ -2873,15 +2954,33 @@ export default function AshbyStudio() {
               className="mt-4 pt-3"
               style={{ borderTop: `1px solid ${THEME.borderSoft}` }}
             >
-              <div className="font-mono uppercase mb-1.5"
-                   style={{ fontSize: 9, letterSpacing: '0.1em', color: THEME.inkFaint }}>
-                Materials Project API key
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="font-mono uppercase"
+                      style={{ fontSize: 9, letterSpacing: '0.1em', color: THEME.inkFaint }}>
+                  Materials Project API key
+                </span>
+                <span
+                  className="font-mono"
+                  style={{
+                    fontSize: 9,
+                    padding: '2px 6px',
+                    borderRadius: 10,
+                    background: mpKeySource === 'user' ? THEME.ink : THEME.paperDark,
+                    color: mpKeySource === 'user' ? THEME.paperLight : THEME.inkMuted,
+                    border: `1px solid ${THEME.border}`,
+                  }}
+                  title={mpKeySource === 'user'
+                    ? 'Your saved key is being used for all MP lookups.'
+                    : 'A shared demo key bundled with the site is being used. Paste your own to override.'}
+                >
+                  {mpKeySource === 'user' ? 'your key' : 'bundled key'}
+                </span>
               </div>
               <input
                 type="password"
-                value={mpApiKey}
-                onChange={(e) => setMpApiKey(e.target.value)}
-                placeholder="paste key — stored in this browser only"
+                value={userMpKey}
+                onChange={(e) => setUserMpKey(e.target.value)}
+                placeholder="paste your own key (overrides bundled)"
                 className="font-mono w-full"
                 style={{
                   fontSize: 12,
@@ -2893,14 +2992,27 @@ export default function AshbyStudio() {
                   outline: 'none',
                 }}
               />
-              <div className="font-mono text-[10px] mt-1" style={{ color: THEME.inkFaint }}>
+              {userMpKey && (
+                <button
+                  className="btn btn-ghost mt-1.5"
+                  onClick={() => setUserMpKey('')}
+                  style={{ fontSize: 10, padding: '3px 8px' }}
+                  title="Remove your key and revert to the bundled demo key"
+                >
+                  <X size={10} /> Clear &amp; use bundled key
+                </button>
+              )}
+              <div className="font-mono text-[10px] mt-2" style={{ color: THEME.inkFaint }}>
                 Free key from{' '}
                 <a href="https://next-gen.materialsproject.org/api"
                    target="_blank" rel="noopener noreferrer"
                    style={{ color: THEME.accent }}>
                   materialsproject.org/api
                 </a>
-                . Enables "Quick fill" in the Add-material dialog (autofills density &amp; modulus for inorganic crystals).
+                . Enables "Quick fill" in the Add-material dialog (autofills
+                density &amp; modulus for inorganic crystals). Stored in this
+                browser's localStorage only — never sent anywhere except
+                directly to the Materials Project API.
               </div>
             </div>
 
