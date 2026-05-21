@@ -5,7 +5,7 @@ import {
   Upload, Download, Eye, EyeOff, Trash2, X, Plus,
   Layers, Grid3x3, ZoomIn, ZoomOut, Maximize2, Sparkles,
   Info, Target, Settings2, Dot, ChevronDown, Zap,
-  FlaskConical, Compass, Wrench, Crop, FileText,
+  FlaskConical, Compass, Wrench, Crop, FileText, TrendingUp,
 } from 'lucide-react';
 
 import { THEME, PALETTE } from './theme.js';
@@ -468,7 +468,7 @@ input[type="range"]::-moz-range-thumb {
 
 function AshbyChart({
   materials, showPoints, showGrid, showLabels, showFamilies,
-  indices, filter, axisConfig, hoverId, setHoverId, focusId, setFocusId,
+  indices, filter, paretoData, chartAxes, axisConfig, hoverId, setHoverId, focusId, setFocusId,
   onGalvanic, captureRef,
 }) {
   const wrapperRef = useRef(null);
@@ -620,6 +620,15 @@ function AshbyChart({
       (yMax == null || y <= yMax)
     );
   }, [filterBounds]);
+
+  /* Path for the dashed Pareto frontier line. */
+  const paretoPath = useMemo(() => {
+    if (!paretoData || paretoData.frontier.length < 2) return null;
+    return d3.line()
+      .x(d => xScale(d[0]))
+      .y(d => yScale(d[1]))
+      (paretoData.frontier);
+  }, [paretoData, xScale, yScale]);
 
   const onWrapperMouseMove = useCallback((evt) => {
     if (!wrapperRef.current) return;
@@ -852,6 +861,31 @@ function AshbyChart({
             );
           })()}
 
+          {paretoData && paretoData.frontier.length > 0 && (
+            <g clipPath="url(#plot-clip)" style={{ pointerEvents: 'none' }}>
+              {paretoPath && (
+                <path
+                  d={paretoPath}
+                  fill="none"
+                  stroke={THEME.ink}
+                  strokeWidth={1.4}
+                  strokeDasharray="6 4"
+                  opacity={0.55}
+                />
+              )}
+              {paretoData.frontier.map((p, i) => (
+                <circle
+                  key={`pf-${i}`}
+                  cx={xScale(p[0])} cy={yScale(p[1])}
+                  r={3.2}
+                  fill={THEME.paperLight}
+                  stroke={THEME.ink}
+                  strokeWidth={1.4}
+                />
+              ))}
+            </g>
+          )}
+
           {/* Super-family background regions — broad material classes
               rendered as tinted blobs underneath individual envelopes. */}
           {showFamilies && (
@@ -883,14 +917,17 @@ function AshbyChart({
                 const userDimmed = (focusId && focusId !== m.id) || (hoverId && hoverId !== m.id);
                 const focused = focusId === m.id || hoverId === m.id;
                 const outOfRegion = !isInRegion(m.points);
-                const opacity = outOfRegion
+                const offPareto = paretoData && !paretoData.ids.has(m.id);
+                const baseOpacity = outOfRegion
                   ? 0.08
                   : (isHL
                     ? 1
                     : (hasHighlight ? 0.18 : (userDimmed ? 0.18 : (focused ? 1 : 0.85))));
+                const opacity = offPareto ? baseOpacity * 0.18 : baseOpacity;
+                const onPareto = paretoData && paretoData.ids.has(m.id);
                 const strokeWidth = isHL
                   ? (m.highlightRank === 1 ? 3 : 2.2)
-                  : (focused ? 2 : 1.2);
+                  : (focused ? 2 : (onPareto ? 1.8 : 1.2));
                 const dashArray = isHL ? 'none' : (focused ? 'none' : '3 3');
                 const path = lineGen(m.hull);
                 return (
@@ -937,9 +974,11 @@ function AshbyChart({
             const isHL = !!m.highlightRank;
             const userDimmed = (focusId && focusId !== m.id) || (hoverId && hoverId !== m.id);
             const outOfRegion = !isInRegion(m.points);
-            const labelOpacity = outOfRegion
+            const offPareto = paretoData && !paretoData.ids.has(m.id);
+            const baseLabelOpacity = outOfRegion
               ? 0.12
               : (isHL ? 1 : (hasHighlight ? 0.25 : (userDimmed ? 0.35 : 1)));
+            const labelOpacity = offPareto ? baseLabelOpacity * 0.2 : baseLabelOpacity;
             const name = isHL ? `#${m.highlightRank}  ${m.name}` : m.name;
             const w = Math.max(48, name.length * 6.2 + 14);
             const h = 18;
@@ -1296,7 +1335,7 @@ function fmtNum(n, d = 3) {
   return n.toFixed(d);
 }
 
-function buildReportHTML({ generatedAt, chartDataURL, chartAxes, axisConfig, indices, filter, materials, wizard, build }) {
+function buildReportHTML({ generatedAt, chartDataURL, chartAxes, axisConfig, indices, filter, paretoData, materials, wizard, build }) {
   const date = generatedAt.toLocaleString();
   const xLabel = PROPERTY_META[chartAxes.xKey]?.label ?? chartAxes.xKey;
   const yLabel = PROPERTY_META[chartAxes.yKey]?.label ?? chartAxes.yKey;
@@ -1316,13 +1355,40 @@ function buildReportHTML({ generatedAt, chartDataURL, chartAxes, axisConfig, ind
   if (indices?.visible) {
     filterRows.push(['Performance index', `${indexLabel(indices.mode)} = ${fmtNum(indices.constant)}`]);
   }
+  if (paretoData) {
+    filterRows.push(['Pareto front',
+      `${paretoData.count} of ${paretoData.total} (${paretoData.xDir} ${xLabel}, ${paretoData.yDir} ${yLabel})`]);
+  }
+
+  const paretoSection = paretoData && paretoData.materials.length ? `
+    <section class="block">
+      <h2>2 · Pareto-optimal candidates</h2>
+      <p class="lead">
+        Non-dominated materials on the two-axis trade-off frontier
+        (${escapeHTML(paretoData.xDir)} ${escapeHTML(xLabel)} vs ${escapeHTML(paretoData.yDir)} ${escapeHTML(yLabel)}).
+        Every material listed is at least one point better than every
+        material not listed, given the active axis directions. These
+        are the only candidates worth comparing further — the rest are
+        strictly worse in at least one objective without compensating in
+        the other.
+      </p>
+      <table class="grid">
+        <thead><tr><th>#</th><th>Material</th></tr></thead>
+        <tbody>
+          ${paretoData.materials.map((m, i) => `
+            <tr><td class="num">${i + 1}</td><td>${escapeHTML(m.name)}</td></tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </section>
+  ` : '';
 
   const wiz = wizard;
   const bld = build;
 
   const wizardSection = wiz ? `
     <section class="block">
-      <h2>2 · Selection pipeline (AHP → TOPSIS → Pugh)</h2>
+      <h2>3 · Selection pipeline (AHP → TOPSIS → Pugh)</h2>
       <p class="lead">
         Materials are filtered to the chosen environment and layer role,
         then ranked by a weighted multi-criteria scheme. Weights are derived
@@ -1421,7 +1487,7 @@ function buildReportHTML({ generatedAt, chartDataURL, chartAxes, axisConfig, ind
 
   const buildSection = bld && bld.layers && bld.layers.length ? `
     <section class="block">
-      <h2>3 · Suit build configuration</h2>
+      <h2>4 · Suit build configuration</h2>
       <p class="lead">
         Per-layer material assignment from outer to inner, with ply counts
         and Weighted-Sum-Model fit scores. WSM normalizes each property
@@ -1543,6 +1609,8 @@ function buildReportHTML({ generatedAt, chartDataURL, chartAxes, axisConfig, ind
     ` : ''}
   </section>
 
+  ${paretoSection}
+
   ${wizardSection}
 
   ${buildSection}
@@ -1621,6 +1689,17 @@ export default function AshbyStudio() {
     yMax: '',
   });
 
+  /* Pareto-front highlight. Direction per axis defaults to the
+     property's `beneficial` flag (true = maximize). Epsilon is a
+     percentage slack — ε-Pareto admits materials within ε of the
+     true frontier, helpful with the small nominal database. */
+  const [pareto, setPareto] = useState({
+    visible: false,
+    xDir: null,   // 'min' | 'max' — null = auto from beneficial flag
+    yDir: null,
+    epsilon: 0,   // 0..20 (percent)
+  });
+
   /* Snapshots from the wizard + builder, captured via callbacks so
      the report exporter can summarize state owned by those panels. */
   const [wizardSnapshot, setWizardSnapshot] = useState(null);
@@ -1643,6 +1722,7 @@ export default function AshbyStudio() {
       axisConfig,
       indices,
       filter,
+      paretoData,
       materials,
       wizard: wizardSnapshot,
       build: builderSnapshot,
@@ -1656,7 +1736,7 @@ export default function AshbyStudio() {
     w.document.open();
     w.document.write(html);
     w.document.close();
-  }, [chartAxes, axisConfig, indices, filter, materials, wizardSnapshot, builderSnapshot]);
+  }, [chartAxes, axisConfig, indices, filter, paretoData, materials, wizardSnapshot, builderSnapshot]);
 
   const [aboutOpen, setAboutOpen] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
@@ -1718,7 +1798,7 @@ export default function AshbyStudio() {
       const raw = localStorage.getItem('ashby:openSections');
       if (raw) return JSON.parse(raw);
     } catch {}
-    return { materials: true, appearance: true, axes: true, perfIndex: false, filter: false };
+    return { materials: true, appearance: true, axes: true, perfIndex: false, filter: false, pareto: false };
   });
   useEffect(() => {
     try { localStorage.setItem('ashby:openSections', JSON.stringify(openSections)); } catch {}
@@ -1824,6 +1904,71 @@ export default function AshbyStudio() {
       };
     });
   }, [materials, chartAxes, highlightedIds]);
+
+  /* Pareto-front analysis on the currently-plotted axes. A material
+     is marked Pareto-optimal if *any* of its sample points lies on
+     the (ε-)frontier — matching how engineers actually read Ashby
+     charts (the envelope touches the frontier). Composes with the
+     active filter region so users can stack constraints. */
+  const paretoData = useMemo(() => {
+    if (!pareto.visible) return null;
+    const xDir = pareto.xDir ?? (PROPERTY_META[chartAxes.xKey]?.beneficial ? 'max' : 'min');
+    const yDir = pareto.yDir ?? (PROPERTY_META[chartAxes.yKey]?.beneficial ? 'max' : 'min');
+    const dx = xDir === 'max' ? 1 : -1;
+    const dy = yDir === 'max' ? 1 : -1;
+    const eps = Math.max(0, pareto.epsilon ?? 0) / 100;  // log-space slack
+
+    const inRegion = (pts) => {
+      if (!filter.visible || !pts || !pts.length) return true;
+      const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) && n > 0 ? n : null; };
+      const xMin = num(filter.xMin), xMax = num(filter.xMax);
+      const yMin = num(filter.yMin), yMax = num(filter.yMax);
+      if (xMin == null && xMax == null && yMin == null && yMax == null) return true;
+      return pts.some(([x, y]) =>
+        (xMin == null || x >= xMin) &&
+        (xMax == null || x <= xMax) &&
+        (yMin == null || y >= yMin) &&
+        (yMax == null || y <= yMax));
+    };
+
+    const items = chartMaterials.filter(m =>
+      m.visible && m.points && m.points.length && inRegion(m.points)
+    );
+
+    const allPts = [];
+    for (const m of items) {
+      for (const [x, y] of m.points) {
+        if (x > 0 && y > 0) {
+          allPts.push({ id: m.id, name: m.name, x, y, u: dx * Math.log(x), v: dy * Math.log(y) });
+        }
+      }
+    }
+
+    const ndPts = [];
+    for (const p of allPts) {
+      let dominated = false;
+      for (const q of allPts) {
+        if (q === p) continue;
+        if (q.u >= p.u + eps && q.v >= p.v + eps) {
+          if (eps > 0 || q.u > p.u || q.v > p.v) { dominated = true; break; }
+        }
+      }
+      if (!dominated) ndPts.push(p);
+    }
+
+    const ids = new Set(ndPts.map(p => p.id));
+    const frontier = [...ndPts]
+      .sort((a, b) => dx === 1 ? a.x - b.x : b.x - a.x)
+      .map(p => [p.x, p.y]);
+
+    const namedIds = [];
+    const seen = new Set();
+    for (const p of ndPts) {
+      if (!seen.has(p.id)) { seen.add(p.id); namedIds.push({ id: p.id, name: p.name }); }
+    }
+
+    return { ids, frontier, xDir, yDir, total: items.length, count: ids.size, materials: namedIds };
+  }, [pareto, chartAxes, chartMaterials, filter]);
 
   /* File handling — accepts both legacy scatter CSVs (one file =
      one material's measured points) and property-spec CSVs (one
@@ -2327,6 +2472,99 @@ export default function AshbyStudio() {
             </div>
           )}
 
+          {/* Pareto-front highlight */}
+          <SectionHeader
+            icon={TrendingUp} title="Pareto Front"
+            open={openSections.pareto}
+            onToggle={() => toggleSection('pareto')}
+          />
+          {openSections.pareto && (() => {
+            const xMetaDir = PROPERTY_META[chartAxes.xKey]?.beneficial ? 'max' : 'min';
+            const yMetaDir = PROPERTY_META[chartAxes.yKey]?.beneficial ? 'max' : 'min';
+            const xDir = pareto.xDir ?? xMetaDir;
+            const yDir = pareto.yDir ?? yMetaDir;
+            const dirBtn = (current, target, onClick) => (
+              <button
+                onClick={onClick}
+                className="btn flex-1 justify-center"
+                style={{
+                  background: current === target ? THEME.ink : THEME.paperLight,
+                  color:      current === target ? THEME.paperLight : THEME.ink,
+                  borderColor: current === target ? THEME.ink : THEME.border,
+                  fontSize: 10, padding: '4px 6px',
+                }}
+              >
+                {target === 'max' ? 'maximize' : 'minimize'}
+              </button>
+            );
+            return (
+              <div className="px-4 py-3 flex flex-col gap-3">
+                <label className="flex items-center gap-2.5 cursor-pointer text-sm">
+                  <input type="checkbox" className="checkbox"
+                         checked={pareto.visible}
+                         onChange={e => setPareto(s => ({ ...s, visible: e.target.checked }))} />
+                  <span>Highlight Pareto-optimal</span>
+                </label>
+
+                <div className="flex flex-col gap-1.5">
+                  <span className="font-mono text-[9px] uppercase" style={{ color: THEME.inkFaint }}>
+                    X · {PROPERTY_META[chartAxes.xKey]?.label}
+                  </span>
+                  <div className="flex gap-1">
+                    {dirBtn(xDir, 'min', () => setPareto(s => ({ ...s, xDir: 'min' })))}
+                    {dirBtn(xDir, 'max', () => setPareto(s => ({ ...s, xDir: 'max' })))}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <span className="font-mono text-[9px] uppercase" style={{ color: THEME.inkFaint }}>
+                    Y · {PROPERTY_META[chartAxes.yKey]?.label}
+                  </span>
+                  <div className="flex gap-1">
+                    {dirBtn(yDir, 'min', () => setPareto(s => ({ ...s, yDir: 'min' })))}
+                    {dirBtn(yDir, 'max', () => setPareto(s => ({ ...s, yDir: 'max' })))}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-baseline justify-between mb-1">
+                    <span className="font-mono text-[10px]" style={{ color: THEME.inkMuted }}>ε tolerance</span>
+                    <span className="font-mono text-[11px]">{pareto.epsilon}%</span>
+                  </div>
+                  <input
+                    type="range" min="0" max="20" step="1"
+                    value={pareto.epsilon}
+                    onChange={e => setPareto(s => ({ ...s, epsilon: parseInt(e.target.value, 10) }))}
+                  />
+                  <div className="font-mono text-[9px] mt-1" style={{ color: THEME.inkFaint }}>
+                    materials within ε% of the frontier are kept
+                  </div>
+                </div>
+
+                {paretoData && (
+                  <div
+                    className="font-mono text-[10px] px-2 py-1.5 rounded text-center"
+                    style={{ background: THEME.paper, border: `1px solid ${THEME.border}`, color: THEME.ink }}
+                  >
+                    <b>{paretoData.count}</b> Pareto-optimal of {paretoData.total} visible
+                  </div>
+                )}
+
+                <button
+                  onClick={() => setPareto(s => ({ ...s, xDir: null, yDir: null, epsilon: 0 }))}
+                  className="btn justify-center"
+                  style={{
+                    background: THEME.paperLight,
+                    borderColor: THEME.border,
+                    fontSize: 11, padding: '5px 6px',
+                  }}
+                >
+                  Reset directions
+                </button>
+              </div>
+            );
+          })()}
+
           <div className="flex-1" />
 
           <div className="px-4 py-3 font-mono text-[9px]" style={{ color: THEME.inkFaint, borderTop: `1px solid ${THEME.border}` }}>
@@ -2344,6 +2582,8 @@ export default function AshbyStudio() {
             showFamilies={showFamilies}
             indices={indices}
             filter={filter}
+            paretoData={paretoData}
+            chartAxes={chartAxes}
             axisConfig={axisConfig}
             captureRef={chartCaptureRef}
             hoverId={hoverId} setHoverId={setHoverId}
