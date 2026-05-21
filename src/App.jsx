@@ -1708,35 +1708,8 @@ export default function AshbyStudio() {
 
   /* Build a self-contained HTML report and open it in a new window
      with print-on-load. Browsers' print dialog supports "Save as PDF"
-     so we avoid pulling in a heavy PDF library. */
-  const exportReport = useCallback(async () => {
-    let chartDataURL = null;
-    try {
-      if (chartCaptureRef.current) chartDataURL = await chartCaptureRef.current();
-    } catch (e) { console.warn('chart capture failed', e); }
-
-    const html = buildReportHTML({
-      generatedAt: new Date(),
-      chartDataURL,
-      chartAxes,
-      axisConfig,
-      indices,
-      filter,
-      paretoData,
-      materials,
-      wizard: wizardSnapshot,
-      build: builderSnapshot,
-    });
-
-    const w = window.open('', '_blank');
-    if (!w) {
-      alert('Pop-up blocked — please allow pop-ups for this site to export the report.');
-      return;
-    }
-    w.document.open();
-    w.document.write(html);
-    w.document.close();
-  }, [chartAxes, axisConfig, indices, filter, paretoData, materials, wizardSnapshot, builderSnapshot]);
+     so we avoid pulling in a heavy PDF library. NOTE: declared after
+     paretoData/chartMaterials so the deps array doesn't hit a TDZ. */
 
   const [aboutOpen, setAboutOpen] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
@@ -1969,6 +1942,38 @@ export default function AshbyStudio() {
 
     return { ids, frontier, xDir, yDir, total: items.length, count: ids.size, materials: namedIds };
   }, [pareto, chartAxes, chartMaterials, filter]);
+
+  /* Build a self-contained HTML report and open it in a new window
+     with print-on-load. Browsers' print dialog supports "Save as PDF"
+     so we avoid pulling in a heavy PDF library. */
+  const exportReport = useCallback(async () => {
+    let chartDataURL = null;
+    try {
+      if (chartCaptureRef.current) chartDataURL = await chartCaptureRef.current();
+    } catch (e) { console.warn('chart capture failed', e); }
+
+    const html = buildReportHTML({
+      generatedAt: new Date(),
+      chartDataURL,
+      chartAxes,
+      axisConfig,
+      indices,
+      filter,
+      paretoData,
+      materials,
+      wizard: wizardSnapshot,
+      build: builderSnapshot,
+    });
+
+    const w = window.open('', '_blank');
+    if (!w) {
+      alert('Pop-up blocked — please allow pop-ups for this site to export the report.');
+      return;
+    }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+  }, [chartAxes, axisConfig, indices, filter, paretoData, materials, wizardSnapshot, builderSnapshot]);
 
   /* File handling — accepts both legacy scatter CSVs (one file =
      one material's measured points) and property-spec CSVs (one
