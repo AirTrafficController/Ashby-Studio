@@ -47,6 +47,7 @@ export default function SelectionWizard({
   setWidth,
   onHighlight,
   onAxisRequest,
+  onSnapshot,
   hidden = false,
 }) {
   // Pool to draw candidates from. When the host app passes its own
@@ -194,6 +195,33 @@ export default function SelectionWizard({
       onAxisRequest('density', yKey);
     }
   }, [layer, onAxisRequest]);
+
+  /* --- Expose state to host app (for the PDF report export) --- */
+  useEffect(() => {
+    if (typeof onSnapshot !== 'function') return;
+    onSnapshot({
+      step,
+      environment,
+      layer,
+      filters: { tMin, tMax, morphology, useLayerFilter, maxCost, minChemRes },
+      candidateCount: candidates.length,
+      criteria,
+      weights: ahp.weights,
+      consistencyRatio: ahp.CR,
+      pairValues,
+      ranking: ranking.slice(0, 10).map(r => ({
+        id: r.id, name: r.name, family: r.family,
+        score: r.score, dPlus: r.dPlus, dMinus: r.dMinus,
+      })),
+      baselineId,
+      baselineName: candidates.find(c => c.id === baselineId)?.name ?? null,
+      pugh: Array.isArray(pugh) ? pugh : null,
+    });
+  }, [
+    onSnapshot, step, environment, layer, tMin, tMax, morphology, useLayerFilter,
+    maxCost, minChemRes, candidates.length, criteria, ahp.weights, ahp.CR,
+    pairValues, ranking, baselineId, pugh,
+  ]);
 
   const canAdvance = (() => {
     if (step === 0) return candidates.length > 0;
