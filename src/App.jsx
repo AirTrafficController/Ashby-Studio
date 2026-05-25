@@ -1385,7 +1385,7 @@ function MaterialRow({ m, onToggle, onDelete, onFocus, isFocus }) {
    a clickable accordion toggle. Otherwise it's a static label.
    ============================================================ */
 
-function SectionHeader({ icon: Icon, title, right, open, onToggle }) {
+function SectionHeader({ icon: Icon, title, right, open, onToggle, count }) {
   const interactive = typeof onToggle === 'function';
   return (
     <div
@@ -1415,6 +1415,21 @@ function SectionHeader({ icon: Icon, title, right, open, onToggle }) {
             style={{ color: THEME.inkMuted, fontWeight: 500 }}>
         {title}
       </span>
+      {Number.isFinite(count) && (
+        <span
+          className="font-mono text-[9px]"
+          style={{
+            color: THEME.inkMuted,
+            background: THEME.paperLight,
+            border: `1px solid ${THEME.border}`,
+            borderRadius: 8,
+            padding: '0.5px 6px',
+            flexShrink: 0,
+          }}
+        >
+          {count}
+        </span>
+      )}
       <div className="flex-1" />
       {right}
     </div>
@@ -2293,6 +2308,7 @@ export default function AshbyStudio() {
           <SectionHeader
             icon={Layers}
             title="Materials"
+            count={materials.length}
             open={openSections.materials}
             onToggle={() => toggleSection('materials')}
             right={

@@ -170,6 +170,10 @@ export default function SelectionWizard({
     setAiLoading(true);
     try {
       const r = await generateWizardSetup(aiText, anthropicKey.trim());
+      if (!r.relevant) {
+        setAiError('Please describe a protective-suit material-selection mission (space, deep-sea, or chemical).');
+        return;
+      }
       setEnvironment(r.environment);
       setLayer(r.layer);
       setTMin(r.tMin);
