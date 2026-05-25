@@ -34,9 +34,9 @@ Return ONLY a single JSON object (no prose, no markdown fences) with these field
   "environment": one of ["space","deep_sea","chemical"],
   "layer": one of ["outer_shell","thermal","pressure_bladder","inner_liner","gloves","helmet","seals_joints"],
   "tMin": number or null  // minimum service temperature in Celsius, if the brief implies one
-  "tMax": number or null  // minimum REQUIRED max-use temperature in Celsius (candidates must tolerate at least this)
+  "tMax": number or null  // minimum REQUIRED max-use temperature in Celsius; null unless the brief implies a real heat requirement
   "morphology": one of ["any","rigid","semi_rigid","soft"],
-  "useLayerFilter": boolean,  // true only if the brief clearly targets one suit layer
+  "useLayerFilter": boolean,
   "maxCost": integer 1-4,     // cost ceiling; 1=low only ... 4=no limit
   "minChemRes": integer 1-4,  // chemical-resistance floor; 1=no limit ... 4=excellent required
   "importance": {             // relative importance 1-9 (9=most critical) of each property for THIS use case
@@ -47,6 +47,13 @@ Return ONLY a single JSON object (no prose, no markdown fences) with these field
 }
 
 Property meanings: density g/cc (lower better), modulus GPa stiffness (higher better), strength MPa (higher better), tMax max-use temp C (higher better), cost ordinal 1-4 (lower better), chemRes chemical resistance 1-4 (higher better).
+
+CRITICAL — prefer ranking over exclusion. This tool ranks candidates with the importance weights; the spec fields can also HARD-FILTER (remove) candidates, and stacking several on a small database can leave zero matches. So express priorities through "importance", and keep hard filters OFF unless the brief makes them strict must-haves:
+- Default useLayerFilter to false. Set true only if the brief explicitly says to consider only materials standard for that one layer.
+- Default morphology to "any". Choose a specific morphology only when rigidity/softness is an essential, non-negotiable requirement.
+- Default maxCost to 4 (no limit) and minChemRes to 1 (no limit). Tighten only when the brief clearly demands a cost ceiling or chemical resistance.
+- Set tMax (a heat floor) only for genuinely hot environments; leave it null for cold/cryogenic or ambient missions.
+Still pick the single best-fit layer and environment, and always reflect the real priorities in the importance weights.
 Use sensible engineering judgement. If the brief is vague, choose reasonable defaults rather than refusing.`;
 
 function clampInt(v, lo, hi, fallback) {
