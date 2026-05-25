@@ -136,6 +136,13 @@ export default function SelectionWizard({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
   const [aiRationale, setAiRationale] = useState('');
+  // Bring-your-own-key: stored only in this browser, never bundled.
+  const [anthropicKey, setAnthropicKey] = useState(() => {
+    try { return localStorage.getItem('ashby:anthropicKey') || ''; } catch { return ''; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('ashby:anthropicKey', anthropicKey); } catch {}
+  }, [anthropicKey]);
   // Holds an AI importance vector to apply once `layer` has settled,
   // so it overrides the criteria-reset effect above (declared after it).
   const pendingImportance = useRef(null);
@@ -162,7 +169,7 @@ export default function SelectionWizard({
     setAiError('');
     setAiLoading(true);
     try {
-      const r = await generateWizardSetup(aiText);
+      const r = await generateWizardSetup(aiText, anthropicKey.trim());
       setEnvironment(r.environment);
       setLayer(r.layer);
       setTMin(r.tMin);
@@ -353,6 +360,28 @@ export default function SelectionWizard({
                     style={{ color: THEME.inkMuted }}>
                 Describe your mission
               </span>
+            </div>
+            <input
+              type="password"
+              value={anthropicKey}
+              onChange={(e) => setAnthropicKey(e.target.value)}
+              placeholder="Anthropic API key (sk-ant-…)"
+              autoComplete="off"
+              className="font-mono w-full"
+              style={{
+                fontSize: 11,
+                padding: '4px 6px',
+                border: `1px solid ${THEME.border}`,
+                background: THEME.paperLight,
+                color: THEME.ink,
+                borderRadius: 3,
+                outline: 'none',
+              }}
+            />
+            <div className="font-mono text-[9px] leading-snug" style={{ color: THEME.inkFaint }}>
+              stored in this browser only · used for your own calls ·{' '}
+              <a href="https://console.anthropic.com" target="_blank" rel="noreferrer"
+                 style={{ color: THEME.accent }}>get a key</a>
             </div>
             <textarea
               className="w-full px-2 py-1.5 text-xs font-body scroll-thin"

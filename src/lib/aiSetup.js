@@ -7,11 +7,12 @@
    user reviews and adjusts every field before it drives any
    ranking, so an imperfect guess is never silently authoritative.
 
-   Demo note: this calls the Anthropic API directly from the
-   browser using the key in VITE_ANTHROPIC_API_KEY. That key is
-   bundled into the client and visible to anyone who inspects the
-   page — acceptable for a local demo ONLY. For a public deploy,
-   move this call behind a server-side proxy.
+   Bring-your-own-key: the caller passes an Anthropic API key that
+   the user entered in the UI (kept in their own browser only). No
+   key is bundled into the app, so the deployed static site holds
+   no secret — it is safe to host publicly (e.g. GitHub Pages).
+   Each user's key is sent from their own browser straight to the
+   Anthropic API and billed to their own account.
    ============================================================ */
 
 const MODEL = 'claude-sonnet-4-6';
@@ -94,10 +95,9 @@ function sanitize(raw) {
   };
 }
 
-export async function generateWizardSetup(missionText) {
-  const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
+export async function generateWizardSetup(missionText, apiKey) {
   if (!apiKey) {
-    throw new Error('No API key. Set VITE_ANTHROPIC_API_KEY in your .env and restart the dev server.');
+    throw new Error('Add your Anthropic API key first (the field above).');
   }
   const text = String(missionText || '').trim();
   if (!text) throw new Error('Describe the mission first.');
