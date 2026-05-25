@@ -1,8 +1,9 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import {
   ChevronLeft, ChevronRight, AlertTriangle, Check,
-  Sliders, Filter, ListOrdered, Scale,
+  Sliders, Filter, ListOrdered, Scale, Sparkles, Loader2,
 } from 'lucide-react';
+import { generateWizardSetup } from '../lib/aiSetup.js';
 import { THEME } from '../theme.js';
 import {
   MATERIALS, ENVIRONMENTS, LAYERS, ENV_LABEL, LAYER_LABEL,
@@ -129,6 +130,57 @@ export default function SelectionWizard({
     }
     setPairValues(init);
   }, [criteria.length, layer]);
+
+  // ===== AI-assisted setup =====
+  const [aiText, setAiText] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const [aiRationale, setAiRationale] = useState('');
+  // Holds an AI importance vector to apply once `layer` has settled,
+  // so it overrides the criteria-reset effect above (declared after it).
+  const pendingImportance = useRef(null);
+  const [prefillNonce, setPrefillNonce] = useState(0);
+
+  useEffect(() => {
+    const pend = pendingImportance.current;
+    if (!pend || pend.layer !== layer) return;
+    const keys = LAYER_CRITERIA[layer] ?? ['density', 'strength', 'tMax', 'cost'];
+    const pv = {};
+    for (let i = 0; i < keys.length; i++) {
+      for (let j = i + 1; j < keys.length; j++) {
+        const impI = pend.importance[keys[i]] ?? 5;
+        const impJ = pend.importance[keys[j]] ?? 5;
+        // Slider convention here: positive = criterion j dominant.
+        pv[`${i}_${j}`] = Math.max(-8, Math.min(8, Math.round(impJ - impI)));
+      }
+    }
+    setPairValues(pv);
+    pendingImportance.current = null;
+  }, [prefillNonce, criteria.length, layer]);
+
+  async function runAiSetup() {
+    setAiError('');
+    setAiLoading(true);
+    try {
+      const r = await generateWizardSetup(aiText);
+      setEnvironment(r.environment);
+      setLayer(r.layer);
+      setTMin(r.tMin);
+      setTMax(r.tMax);
+      setMorphology(r.morphology);
+      setUseLayerFilter(r.useLayerFilter);
+      setMaxCost(r.maxCost);
+      setMinChemRes(r.minChemRes);
+      setAiRationale(r.rationale);
+      pendingImportance.current = { layer: r.layer, importance: r.importance };
+      setPrefillNonce((n) => n + 1);
+      setStep(0);
+    } catch (e) {
+      setAiError(e?.message || 'Setup failed.');
+    } finally {
+      setAiLoading(false);
+    }
+  }
 
   /* --- Compute AHP weights from current pair values --- */
   const ahp = useMemo(() => {
@@ -290,6 +342,56 @@ export default function SelectionWizard({
 
       {/* Step content */}
       <div className="flex-1 overflow-y-auto px-4 py-4">
+        {step === 0 && (
+          <div
+            className="mb-4 rounded p-3 flex flex-col gap-2"
+            style={{ border: `1px solid ${THEME.border}`, background: THEME.paper }}
+          >
+            <div className="flex items-center gap-1.5">
+              <Sparkles size={12} style={{ color: THEME.accent }} />
+              <span className="font-mono text-[10px] uppercase tracking-wider"
+                    style={{ color: THEME.inkMuted }}>
+                Describe your mission
+              </span>
+            </div>
+            <textarea
+              className="w-full px-2 py-1.5 text-xs font-body scroll-thin"
+              rows={3}
+              placeholder="e.g. Glove layer for a Europa lander — must survive cryogenic temps and abrasion, low weight matters most, cost is secondary."
+              value={aiText}
+              onChange={(e) => setAiText(e.target.value)}
+              disabled={aiLoading}
+              style={{
+                border: `1px solid ${THEME.border}`,
+                background: THEME.paperLight,
+                color: THEME.ink,
+                borderRadius: 3,
+                resize: 'vertical',
+              }}
+            />
+            <button
+              className="btn btn-primary"
+              onClick={runAiSetup}
+              disabled={aiLoading || !aiText.trim()}
+              style={{ opacity: aiLoading || !aiText.trim() ? 0.5 : 1, justifyContent: 'center' }}
+            >
+              {aiLoading
+                ? <><Loader2 size={12} className="ai-spin" /> Generating…</>
+                : <><Sparkles size={12} /> Generate setup</>}
+            </button>
+            {aiError && (
+              <div className="text-[11px]" style={{ color: THEME.accent }}>
+                {aiError}
+              </div>
+            )}
+            {!aiError && aiRationale && (
+              <div className="text-[11px]" style={{ color: THEME.inkMuted }}>
+                <span style={{ fontWeight: 600 }}>AI suggestion:</span> {aiRationale}
+                {' '}— review the fields below before continuing.
+              </div>
+            )}
+          </div>
+        )}
         {step === 0 && (
           <SpecPanel
             environment={environment} setEnvironment={setEnvironment}

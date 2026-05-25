@@ -406,6 +406,9 @@ const GLOBAL_CSS = `
 .scroll-thin::-webkit-scrollbar-thumb { background: ${THEME.border}; border-radius: 4px; }
 .scroll-thin::-webkit-scrollbar-track { background: transparent; }
 
+@keyframes ai-spin { to { transform: rotate(360deg); } }
+.ai-spin { animation: ai-spin 0.8s linear infinite; }
+
 .paper-grain {
   background-color: ${THEME.paper};
   background-image:
