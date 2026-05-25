@@ -17,6 +17,11 @@ export default function CustomMaterialModal({ open, onClose, onAdd, mpApiKey }) 
   const [form, setForm] = useState(initialForm());
   const [error, setError] = useState(null);
 
+  // User-defined suit layers, persisted for the session. Each entry is
+  // { id, label }; ids are slugged so they don't collide with built-ins.
+  const [customLayers, setCustomLayers] = useState([]);
+  const [newLayer, setNewLayer] = useState('');
+
   // Materials Project lookup state
   const [mpQuery, setMpQuery] = useState('');
   const [mpResults, setMpResults] = useState(null); // null | array
@@ -78,6 +83,19 @@ export default function CustomMaterialModal({ open, onClose, onAdd, mpApiKey }) 
     });
   };
 
+  const addLayer = () => {
+    const label = newLayer.trim();
+    if (!label) return;
+    const id = `custom_layer_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')}`;
+    const known = LAYERS.includes(id) || customLayers.some((l) => l.id === id);
+    if (!known) setCustomLayers((ls) => [...ls, { id, label }]);
+    setForm((f) => ({
+      ...f,
+      layers: f.layers.includes(id) ? f.layers : [...f.layers, id],
+    }));
+    setNewLayer('');
+  };
+
   const submit = () => {
     setError(null);
     if (!form.name.trim()) {
@@ -106,16 +124,23 @@ export default function CustomMaterialModal({ open, onClose, onAdd, mpApiKey }) 
         return;
       }
     }
+    const layerLabels = {};
+    for (const id of form.layers) {
+      const custom = customLayers.find((l) => l.id === id);
+      if (custom) layerLabels[id] = custom.label;
+    }
     onAdd({
       id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       name: form.name.trim(),
       family: form.family.trim() || 'Custom',
       environments: form.environments,
       layers: form.layers,
+      ...(Object.keys(layerLabels).length ? { layerLabels } : {}),
       props,
       notes: form.notes.trim(),
     });
     setForm(initialForm());
+    setNewLayer('');
     onClose();
   };
 
@@ -304,6 +329,40 @@ export default function CustomMaterialModal({ open, onClose, onAdd, mpApiKey }) 
                   {LAYER_LABEL[l]}
                 </Chip>
               ))}
+              {customLayers.map((l) => (
+                <Chip key={l.id}
+                      active={form.layers.includes(l.id)}
+                      onClick={() => toggleArray('layers', l.id)}>
+                  {l.label}
+                </Chip>
+              ))}
+            </div>
+            <div className="flex gap-2 mt-2">
+              <input
+                type="text"
+                value={newLayer}
+                onChange={(e) => setNewLayer(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addLayer(); } }}
+                placeholder="name a custom layer, e.g. MMOD shield"
+                className="font-mono flex-1"
+                style={{
+                  fontSize: 12,
+                  padding: '5px 7px',
+                  border: `1px solid ${THEME.border}`,
+                  background: THEME.paperLight,
+                  color: THEME.ink,
+                  borderRadius: 3,
+                  outline: 'none',
+                }}
+              />
+              <button
+                type="button"
+                className="btn"
+                onClick={addLayer}
+                disabled={!newLayer.trim()}
+              >
+                <Plus size={12} /> Add layer
+              </button>
             </div>
           </Field>
 
