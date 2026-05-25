@@ -2814,7 +2814,7 @@ export default function AshbyStudio() {
         </aside>
 
         {/* Chart area — hidden in build mode */}
-        <main className="flex-1 relative" style={{ display: mode === 'build' ? 'none' : undefined }}>
+        <main className="flex-1 relative min-w-0" style={{ display: mode === 'build' ? 'none' : undefined }}>
           <AshbyChart
             materials={chartMaterials}
             showPoints={showPoints}

@@ -411,7 +411,7 @@ function SpecPanel({
             <option key={l} value={l}>{LAYER_LABEL[l]}</option>
           ))}
         </select>
-        <div className="font-mono text-[9px] mt-1" style={{ color: THEME.inkFaint }}>
+        <div className="font-mono text-[11px] mt-1" style={{ color: THEME.inkMuted }}>
           layer choice shapes the AHP criteria — it does not restrict candidates
           unless you enable the filter below
         </div>
@@ -422,7 +422,7 @@ function SpecPanel({
           <NumInput placeholder="min" value={tMin} onChange={setTMin} />
           <NumInput placeholder="max" value={tMax} onChange={setTMax} />
         </div>
-        <div className="font-mono text-[9px] mt-1" style={{ color: THEME.inkFaint }}>
+        <div className="font-mono text-[11px] mt-1" style={{ color: THEME.inkMuted }}>
           materials with T_max below the requested max are filtered out
         </div>
       </FieldGroup>
@@ -475,7 +475,7 @@ function SpecPanel({
             ]}
           />
           {flexHint && (
-            <div className="font-mono text-[9px] mt-1" style={{ color: THEME.accent }}>
+            <div className="font-mono text-[11px] mt-1" style={{ color: THEME.accent }}>
               {LAYER_LABEL[layer]} typically needs flexibility — consider Soft or Semi.
             </div>
           )}
@@ -565,7 +565,7 @@ function SpecPanel({
                 );
               })}
             </ul>
-            <div className="font-mono text-[9px] mt-2" style={{ color: THEME.inkFaint }}>
+            <div className="font-mono text-[11px] mt-2" style={{ color: THEME.inkMuted }}>
               ★ marks materials typically used for {LAYER_LABEL[layer]}
             </div>
           </>
@@ -623,7 +623,7 @@ function WeightPanel({ criteria, pairValues, setPairValues, ahp }) {
                   value={v}
                   onChange={(e) => setPairValues({ ...pairValues, [k]: parseInt(e.target.value, 10) })}
                 />
-                <div className="font-mono text-[9px] mt-1" style={{ color: THEME.inkMuted }}>
+                <div className="font-mono text-[11px] mt-1" style={{ color: THEME.inkMuted }}>
                   {v === 0 ? 'equal'
                     : v > 0 ? `${criteria[j].label} ${sa.toFixed(0)}× more important`
                     : `${criteria[i].label} ${(1 / sa).toFixed(0)}× more important`}
@@ -671,7 +671,7 @@ function WeightPanel({ criteria, pairValues, setPairValues, ahp }) {
             );
           })}
         </div>
-        <div className="font-mono text-[9px] mt-2" style={{ color: THEME.inkFaint }}>
+        <div className="font-mono text-[11px] mt-2" style={{ color: THEME.inkMuted }}>
           {ahp.CR < 0.10
             ? '✓ Consistency acceptable (CR < 0.10)'
             : ahp.CR < 0.20
@@ -749,7 +749,7 @@ function RankPanel({ ranking, criteria, weights }) {
           );
         })}
       </ol>
-      <div className="font-mono text-[9px]" style={{ color: THEME.inkFaint }}>
+      <div className="font-mono text-[11px]" style={{ color: THEME.inkMuted }}>
         Top three are highlighted on the chart (rank 1 darkest).
       </div>
     </div>
