@@ -334,6 +334,80 @@ export const MATERIALS = [
     morphology: 'rigid', galvanicGroup: 'N',
     notes: 'High thermal and electrical conductivity, soft.',
   },
+
+  /* ===== FLEXIBLE / CHEMICAL ELASTOMERS (gloves, seals, liners) ===== */
+  {
+    id: 'nbr-nitrile', name: 'Nitrile rubber (NBR)', family: 'Synthetic elastomer',
+    environments: ['deep_sea', 'chemical'], layers: ['gloves', 'inner_liner', 'seals_joints'],
+    props: { density: 1.00, modulus: 0.006, strength: 25, tMax: 120, cost: 1, chemRes: 3 },
+    morphology: 'soft',
+    notes: 'Standard oil/fuel-resistant glove rubber; poor against ketones and strong oxidisers.',
+  },
+  {
+    id: 'chlorobutyl', name: 'Chlorobutyl rubber', family: 'Halobutyl elastomer',
+    environment: 'chemical', layers: ['gloves', 'seals_joints', 'pressure_bladder'],
+    props: { density: 1.12, modulus: 0.004, strength: 16, tMax: 150, cost: 2, chemRes: 4 },
+    morphology: 'soft',
+    notes: 'Low permeation to chemical-warfare agents; standard CBRN glove and boot material.',
+  },
+  {
+    id: 'hypalon-csm', name: 'Hypalon (CSM)', family: 'Chlorosulfonated PE',
+    environments: ['deep_sea', 'chemical'], layers: ['outer_shell', 'gloves'],
+    props: { density: 1.30, modulus: 0.01, strength: 20, tMax: 120, cost: 2, chemRes: 4 },
+    morphology: 'soft',
+    notes: 'Excellent acid/oxidiser and weathering resistance; inflatable-boat and drysuit coating.',
+  },
+  {
+    id: 'natural-rubber', name: 'Natural rubber (latex)', family: 'Natural elastomer',
+    environments: ['deep_sea', 'chemical'], layers: ['gloves', 'inner_liner'],
+    props: { density: 0.95, modulus: 0.003, strength: 28, tMax: 80, cost: 1, chemRes: 2 },
+    morphology: 'soft',
+    notes: 'High elasticity and tear strength, low cost; poor oil/solvent resistance, allergen risk.',
+  },
+  {
+    id: 'flexible-pvc', name: 'Flexible PVC', family: 'Plasticised vinyl',
+    environment: 'chemical', layers: ['gloves', 'inner_liner'],
+    props: { density: 1.30, modulus: 0.01, strength: 15, tMax: 60, cost: 1, chemRes: 3 },
+    morphology: 'soft',
+    notes: 'Inexpensive acid/base splash protection; poor against organic solvents, low temperature ceiling.',
+  },
+
+  /* ===== STRUCTURAL STEELS & MARINE METALS ===== */
+  {
+    id: 'ss-316l', name: 'Stainless steel 316L', family: 'Austenitic stainless',
+    environments: ['space', 'deep_sea', 'chemical'], layers: ['outer_shell', 'helmet', 'seals_joints'],
+    props: { density: 8.00, modulus: 193, strength: 290, tMax: 800, cost: 2, chemRes: 4 },
+    morphology: 'rigid', galvanicGroup: 'K',
+    notes: 'Marine/chemical-grade stainless; strength is annealed yield, excellent chloride resistance.',
+  },
+  {
+    id: 'ss-304', name: 'Stainless steel 304', family: 'Austenitic stainless',
+    environments: ['deep_sea', 'chemical'], layers: ['outer_shell', 'seals_joints'],
+    props: { density: 8.00, modulus: 193, strength: 250, tMax: 800, cost: 2, chemRes: 3 },
+    morphology: 'rigid', galvanicGroup: 'K',
+    notes: 'General-purpose stainless; less pitting-resistant than 316L in seawater.',
+  },
+  {
+    id: 'steel-4130', name: 'AISI 4130 (chromoly)', family: 'Low-alloy steel',
+    environments: ['space', 'deep_sea'], layers: ['outer_shell', 'seals_joints'],
+    props: { density: 7.85, modulus: 205, strength: 560, tMax: 400, cost: 1, chemRes: 2 },
+    morphology: 'rigid', galvanicGroup: 'F',
+    notes: 'Weldable aerospace structural steel; requires coating for corrosion protection.',
+  },
+  {
+    id: 'steel-4340', name: 'AISI 4340 (alloy steel)', family: 'Low-alloy steel',
+    environments: ['space', 'deep_sea'], layers: ['outer_shell', 'seals_joints'],
+    props: { density: 7.85, modulus: 205, strength: 1100, tMax: 400, cost: 2, chemRes: 1 },
+    morphology: 'rigid', galvanicGroup: 'F',
+    notes: 'High-strength quenched-and-tempered steel for high-load joints; poor bare corrosion resistance.',
+  },
+  {
+    id: 'naval-brass', name: 'Naval brass (C46400)', family: 'Copper-zinc alloy',
+    environment: 'deep_sea', layers: ['seals_joints', 'outer_shell'],
+    props: { density: 8.41, modulus: 100, strength: 380, tMax: 300, cost: 2, chemRes: 3 },
+    morphology: 'rigid', galvanicGroup: 'L',
+    notes: 'Dezincification-resistant marine fittings and fasteners.',
+  },
 ];
 
 /* ============================================================
