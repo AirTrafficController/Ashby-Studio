@@ -235,7 +235,7 @@ export default function SelectionWizard({
       className="flex flex-col h-full overflow-hidden relative"
       style={{
         display: hidden ? 'none' : 'flex',
-        width, minWidth: width,
+        width: `min(${width}px, 42vw)`, flexShrink: 0,
         background: THEME.paperLight,
         borderLeft: `1px solid ${THEME.border}`,
       }}

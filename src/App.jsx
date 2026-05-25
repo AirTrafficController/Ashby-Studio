@@ -2277,7 +2277,7 @@ export default function AshbyStudio() {
           className="flex flex-col scroll-thin overflow-y-auto relative"
           style={{
             display: mode === 'build' ? 'none' : undefined,
-            width: leftWidth, minWidth: leftWidth,
+            width: `min(${leftWidth}px, 40vw)`, flexShrink: 0,
             background: THEME.paperLight,
             borderRight: `1px solid ${THEME.border}`,
           }}
