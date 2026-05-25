@@ -48,13 +48,18 @@ Return ONLY a single JSON object (no prose, no markdown fences) with these field
 
 Property meanings: density g/cc (lower better), modulus GPa stiffness (higher better), strength MPa (higher better), tMax max-use temp C (higher better), cost ordinal 1-4 (lower better), chemRes chemical resistance 1-4 (higher better).
 
-CRITICAL — prefer ranking over exclusion. This tool ranks candidates with the importance weights; the spec fields can also HARD-FILTER (remove) candidates, and stacking several on a small database can leave zero matches. So express priorities through "importance", and keep hard filters OFF unless the brief makes them strict must-haves:
-- Default useLayerFilter to false. Set true only if the brief explicitly says to consider only materials standard for that one layer.
-- Default morphology to "any". Choose a specific morphology only when rigidity/softness is an essential, non-negotiable requirement.
-- Default maxCost to 4 (no limit) and minChemRes to 1 (no limit). Tighten only when the brief clearly demands a cost ceiling or chemical resistance.
-- Set tMax (a heat floor) only for genuinely hot environments; leave it null for cold/cryogenic or ambient missions.
-Still pick the single best-fit layer and environment, and always reflect the real priorities in the importance weights.
-Use sensible engineering judgement. If the brief is vague, choose reasonable defaults rather than refusing.`;
+CRITICAL — rank, do not exclude. This tool RANKS candidates using the importance weights. The other spec fields HARD-FILTER: they delete candidates, and the material database is small, so even one or two filters can leave zero matches. Your job is to set the environment, the best-fit layer, and good importance weights — and to leave the hard filters at their permissive defaults almost always.
+
+Emphasis words in the brief ("high", "excellent", "critical", "low weight", "must be strong") describe PRIORITIES, not pass/fail thresholds. Translate them into high importance weights (up to 9), NEVER into hard filters. Example: "needs excellent corrosion resistance" -> set chemRes importance to 9, and leave minChemRes = 1.
+
+Use these defaults and only deviate for an explicit, quantitative, binary requirement (e.g. "rated to operate at 300C", "rigid shell only"):
+- useLayerFilter: false (essentially always).
+- morphology: "any" (only pick rigid/semi_rigid/soft if a rigid-vs-flexible distinction is an absolute hard requirement).
+- maxCost: 4 (no limit).
+- minChemRes: 1 (no limit).
+- tMax: null, unless the brief names a real high operating temperature.
+
+If unsure, prefer the more permissive option so candidates are never needlessly excluded. If the brief is vague, choose reasonable defaults rather than refusing.`;
 
 function clampInt(v, lo, hi, fallback) {
   const n = Math.round(Number(v));
