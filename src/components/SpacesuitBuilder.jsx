@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Plus, Trash2, ChevronUp, ChevronDown, Search, X, AlertCircle, Info, Sparkles, Loader2, CheckCircle2, AlertTriangle, Columns2, Minus } from 'lucide-react';
 import { THEME, PALETTE } from '../theme.js';
 import { MATERIALS } from '../data/materials.js';
-import { analyzeBuild } from '../lib/aiAnalyze.js';
+import { analyzeBuild, analyzeComparison } from '../lib/aiAnalyze.js';
 
 const fmt = (n, d = 2) => {
   if (!Number.isFinite(n)) return '—';
@@ -84,6 +84,29 @@ function buildReviewPayload(layers, pool, norms) {
           score: mat ? wsmScore(mat, layer.name, norms) : null,
         };
       }),
+    })),
+  };
+}
+
+/* Snapshot of both Suit 1 / Suit 2 picks per layer for the comparison reviewer. */
+function buildComparisonPayload(layers, pool, norms) {
+  const pick = (id, layerName) => {
+    const mat = id ? pool.find((m) => m.id === id) : null;
+    return mat ? {
+      name: mat.name,
+      family: mat.family ?? null,
+      props: mat.props ?? null,
+      score: wsmScore(mat, layerName, norms),
+    } : null;
+  };
+  return {
+    overall1: overallFor(layers, pool, norms, 'materialId'),
+    overall2: overallFor(layers, pool, norms, 'materialIdB'),
+    layers: layers.map((layer, index) => ({
+      index,
+      name: layer.name,
+      suit1: layer.slots.map((s) => ({ plies: s.plies, ...(pick(s.materialId, layer.name) ?? { name: null }) })),
+      suit2: layer.slots.map((s) => ({ plies: s.plies, ...(pick(s.materialIdB, layer.name) ?? { name: null }) })),
     })),
   };
 }
@@ -999,6 +1022,141 @@ function DeltaTag({ a, b }) {
   );
 }
 
+function ComparisonReviewPanel({ layers, pool, norms }) {
+  const [apiKey, setApiKey] = useState(() => {
+    try { return localStorage.getItem('ashby:anthropicKey') || ''; } catch { return ''; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('ashby:anthropicKey', apiKey); } catch {}
+  }, [apiKey]);
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [review, setReview] = useState(null);
+
+  const hasPick = layers.some((l) => l.slots.some((s) => s.materialId || s.materialIdB));
+
+  async function run() {
+    setError('');
+    setLoading(true);
+    setReview(null);
+    try {
+      setReview(await analyzeComparison(buildComparisonPayload(layers, pool, norms), apiKey.trim()));
+    } catch (e) {
+      setError(e?.message || 'Evaluation failed.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const recLabel = { '1': 'Suit 1', '2': 'Suit 2', tie: 'Too close to call' };
+  const recColor = (r) => (r === '1' ? PALETTE[0] : r === '2' ? PALETTE[1] : THEME.inkMuted);
+  const winnerTag = (w) => {
+    if (w === '1') return { label: 'Suit 1', color: PALETTE[0] };
+    if (w === '2') return { label: 'Suit 2', color: PALETTE[1] };
+    return { label: 'Tie', color: THEME.inkFaint };
+  };
+
+  return (
+    <div className="mt-5 rounded" style={{ border: `1px solid ${THEME.border}`, background: THEME.paperLight }}>
+      <div className="flex items-center gap-1.5 px-3 py-2" style={{ borderBottom: `1px solid ${THEME.borderSoft}` }}>
+        <Sparkles size={12} style={{ color: THEME.accent }} />
+        <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: THEME.inkMuted }}>
+          AI evaluation
+        </span>
+        <span className="font-mono text-[9px] ml-auto" style={{ color: THEME.inkFaint }}>
+          advisory · suit 1 vs suit 2
+        </span>
+      </div>
+
+      <div className="px-3 py-2.5 flex flex-col gap-2">
+        <input
+          type="password"
+          value={apiKey}
+          onChange={(e) => setApiKey(e.target.value)}
+          placeholder="Anthropic API key (sk-ant-…)"
+          autoComplete="off"
+          className="font-mono w-full"
+          style={{
+            fontSize: 11, padding: '4px 6px',
+            border: `1px solid ${THEME.border}`, background: THEME.paper,
+            color: THEME.ink, borderRadius: 3, outline: 'none',
+          }}
+        />
+        <div className="font-mono text-[9px] leading-snug" style={{ color: THEME.inkFaint }}>
+          stored in this browser only · used for your own calls ·{' '}
+          <a href="https://console.anthropic.com" target="_blank" rel="noreferrer" style={{ color: THEME.accent }}>get a key</a>
+        </div>
+        <button
+          className="btn btn-primary"
+          onClick={run}
+          disabled={loading || !hasPick}
+          style={{ opacity: loading || !hasPick ? 0.5 : 1, justifyContent: 'center' }}
+          title={hasPick ? 'Ask the model to weigh Suit 1 against Suit 2' : 'Assign a material to Suit 1 or Suit 2 first'}
+        >
+          {loading
+            ? <><Loader2 size={12} className="ai-spin" /> Evaluating…</>
+            : <><Sparkles size={12} /> Evaluate the comparison</>}
+        </button>
+
+        {error && <div className="text-[11px]" style={{ color: THEME.accent }}>{error}</div>}
+
+        {review && (
+          <div className="flex flex-col gap-3 pt-1">
+            <div className="rounded px-3 py-2.5" style={{ background: THEME.paper, border: `1px solid ${recColor(review.recommendation)}` }}>
+              <div className="flex items-center gap-1.5 mb-1">
+                <CheckCircle2 size={12} style={{ color: recColor(review.recommendation), flexShrink: 0 }} />
+                <span className="font-mono text-[9px] uppercase tracking-wider" style={{ color: THEME.inkMuted }}>Recommendation</span>
+                <span className="font-mono text-[10px] uppercase tracking-wider ml-auto" style={{ color: recColor(review.recommendation), fontWeight: 700 }}>
+                  {recLabel[review.recommendation]}
+                </span>
+              </div>
+              {review.summary && (
+                <p className="font-body" style={{ fontSize: 12, lineHeight: 1.5, color: THEME.ink }}>{review.summary}</p>
+              )}
+            </div>
+
+            {review.reasoning && (
+              <div>
+                <div className="font-mono text-[9px] uppercase tracking-wider mb-1" style={{ color: THEME.inkMuted }}>Thinking</div>
+                <p className="font-body" style={{ fontSize: 11.5, lineHeight: 1.5, color: THEME.inkMuted }}>{review.reasoning}</p>
+              </div>
+            )}
+
+            {review.layers.length > 0 && (
+              <div className="flex flex-col gap-2">
+                {review.layers.map((l, i) => {
+                  const wt = winnerTag(l.winner);
+                  return (
+                    <div key={i} className="rounded px-2.5 py-2" style={{ background: THEME.paper, border: `1px solid ${THEME.borderSoft}` }}>
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <span className="font-body truncate" style={{ fontSize: 12, fontWeight: 600, color: THEME.ink }}>{l.name}</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wider ml-auto px-1.5 py-0.5 rounded-sm"
+                          style={{ color: 'white', background: wt.color }}>{wt.label}</span>
+                      </div>
+                      {l.note && (
+                        <p className="font-body" style={{ fontSize: 11, lineHeight: 1.45, color: THEME.inkMuted }}>{l.note}</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {review.considerations.length > 0 && (
+              <ReviewList title="Deciding factors" items={review.considerations} icon={AlertTriangle} color={THEME.accent} />
+            )}
+
+            <div className="font-mono text-[9px] leading-snug" style={{ color: THEME.inkFaint }}>
+              AI-generated advisory evaluation — weigh it against the WSM scores and your own judgement before deciding.
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ComparisonSummary({ layers, pool, norms }) {
   const overallA = overallFor(layers, pool, norms, 'materialId');
   const overallB = overallFor(layers, pool, norms, 'materialIdB');
@@ -1101,6 +1259,7 @@ function ComparisonSummary({ layers, pool, norms }) {
             <div className="font-mono text-[9px] mt-3" style={{ color: THEME.inkFaint }}>
               Δ shows the Suit 1 − Suit 2 score gap. ◄ favors Suit 1, ► favors Suit 2. Scores are per-layer WSM averages (0–100) vs. the active material pool.
             </div>
+            <ComparisonReviewPanel layers={layers} pool={pool} norms={norms} />
           </>
         )}
       </div>
