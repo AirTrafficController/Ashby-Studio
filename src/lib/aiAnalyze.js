@@ -142,7 +142,7 @@ export async function analyzeBuild(build, apiKey) {
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 1200,
+        max_tokens: 3000,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: describeBuild(build) }],
       }),
@@ -158,6 +158,9 @@ export async function analyzeBuild(build, apiKey) {
   }
 
   const data = await res.json();
+  if (data.stop_reason === 'max_tokens') {
+    throw new Error('Review was cut off (response too long). Try fewer layers, or retry.');
+  }
   const out = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
   const result = sanitize(extractJson(out));
   if (!result.relevant) {
