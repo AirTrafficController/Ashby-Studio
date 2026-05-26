@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Trash2, ChevronUp, ChevronDown, Search, X, AlertCircle, Info, Sparkles, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Plus, Trash2, ChevronUp, ChevronDown, Search, X, AlertCircle, Info, Sparkles, Loader2, CheckCircle2, AlertTriangle, Columns2, Minus } from 'lucide-react';
 import { THEME, PALETTE } from '../theme.js';
 import { MATERIALS } from '../data/materials.js';
 import { analyzeBuild } from '../lib/aiAnalyze.js';
@@ -14,7 +14,7 @@ const fmt = (n, d = 2) => {
 
 let _seq = 0;
 function uid() { return `sl-${++_seq}-${Math.random().toString(36).slice(2, 5)}`; }
-function makeSlot() { return { id: uid(), materialId: null, plies: 1 }; }
+function makeSlot() { return { id: uid(), materialId: null, materialIdB: null, plies: 1 }; }
 function makeLayer(name) { return { id: uid(), name, slots: [makeSlot()] }; }
 
 const DEFAULT_LAYERS = [
@@ -368,14 +368,34 @@ function MaterialSearch({ pool, selectedId, onSelect }) {
    SLOT ROW — one material + ply count inside a layer
    ============================================================ */
 
-function SlotRow({ slot, pool, onUpdate, onRemove, canRemove, layerName, norms }) {
+function CompareCell({ label, color, score, win }) {
+  return (
+    <div className="flex-1 flex items-center gap-2 rounded px-2 py-1"
+      style={{ background: win && score != null ? `${color}14` : THEME.paperLight,
+        border: `1px solid ${win && score != null ? color : THEME.borderSoft}`, minWidth: 0 }}>
+      <span className="font-mono uppercase flex-shrink-0" style={{ fontSize: 8, letterSpacing: '0.08em', color }}>{label}</span>
+      <div className="flex-1 min-w-0">
+        {score != null
+          ? <ScoreBadge score={score} width={36} />
+          : <span className="font-mono" style={{ fontSize: 10, color: THEME.inkFaint }}>—</span>}
+      </div>
+    </div>
+  );
+}
+
+function SlotRow({ slot, pool, onUpdate, onRemove, canRemove, layerName, norms, compareMode }) {
   const material = slot.materialId ? pool.find(m => m.id === slot.materialId) : null;
   const score = material ? wsmScore(material, layerName, norms) : null;
+  const materialB = slot.materialIdB ? pool.find(m => m.id === slot.materialIdB) : null;
+  const scoreB = materialB ? wsmScore(materialB, layerName, norms) : null;
 
   return (
     <div className="flex flex-col gap-1.5 rounded px-2 py-2"
       style={{ background: THEME.paper, border: `1px solid ${THEME.borderSoft}` }}>
       <div className="flex items-center gap-1.5">
+        {compareMode && (
+          <span className="font-mono uppercase flex-shrink-0" style={{ fontSize: 8, letterSpacing: '0.08em', color: PALETTE[0], width: 34 }}>Suit 1</span>
+        )}
         <div className="flex-1">
           <MaterialSearch
             pool={pool}
@@ -393,7 +413,28 @@ function SlotRow({ slot, pool, onUpdate, onRemove, canRemove, layerName, norms }
         )}
       </div>
 
-      {material && (
+      {compareMode && (
+        <div className="flex items-center gap-1.5">
+          <span className="font-mono uppercase flex-shrink-0" style={{ fontSize: 8, letterSpacing: '0.08em', color: PALETTE[1], width: 34 }}>Suit 2</span>
+          <div className="flex-1">
+            <MaterialSearch
+              pool={pool}
+              selectedId={slot.materialIdB}
+              onSelect={id => onUpdate({ materialIdB: id })}
+            />
+          </div>
+          {canRemove && <div style={{ width: 22, flexShrink: 0 }} />}
+        </div>
+      )}
+
+      {compareMode && (material || materialB) && (
+        <div className="flex items-stretch gap-2 pt-1.5" style={{ borderTop: `1px solid ${THEME.borderSoft}` }}>
+          <CompareCell label="Suit 1" color={PALETTE[0]} score={score} win={score != null && (scoreB == null || score >= scoreB)} />
+          <CompareCell label="Suit 2" color={PALETTE[1]} score={scoreB} win={scoreB != null && (score == null || scoreB > score)} />
+        </div>
+      )}
+
+      {!compareMode && material && (
         <div className="flex items-center gap-3 pt-1.5 flex-wrap" style={{ borderTop: `1px solid ${THEME.borderSoft}`, minWidth: 0 }}>
           <label className="flex items-center gap-2 flex-shrink-0">
             <span className="font-mono uppercase"
@@ -435,7 +476,7 @@ function SlotRow({ slot, pool, onUpdate, onRemove, canRemove, layerName, norms }
    LAYER CARD — editable name + N stacked material slots
    ============================================================ */
 
-function LayerCard({ layer, index, total, pool, color, onUpdate, onRemove, onMove, norms }) {
+function LayerCard({ layer, index, total, pool, color, onUpdate, onRemove, onMove, norms, compareMode }) {
   const addSlot = () => onUpdate({ slots: [...layer.slots, makeSlot()] });
   const removeSlot = id => onUpdate({ slots: layer.slots.filter(s => s.id !== id) });
   const updateSlot = (id, patch) =>
@@ -505,6 +546,7 @@ function LayerCard({ layer, index, total, pool, color, onUpdate, onRemove, onMov
             canRemove={layer.slots.length > 1}
             layerName={layer.name}
             norms={norms}
+            compareMode={compareMode}
           />
         ))}
 
@@ -915,6 +957,158 @@ function Stat({ label, value }) {
 }
 
 /* ============================================================
+   COMPARISON SUMMARY — side-by-side Suit 1 vs Suit 2 diff
+   ============================================================ */
+
+function overallFor(layers, pool, norms, key) {
+  let num = 0, den = 0;
+  for (const layer of layers) {
+    for (const s of layer.slots) {
+      const m = s[key] ? pool.find(mm => mm.id === s[key]) : null;
+      const sc = m ? wsmScore(m, layer.name, norms) : null;
+      if (sc != null) { num += sc * s.plies; den += s.plies; }
+    }
+  }
+  return den > 0 ? Math.round(num / den) : null;
+}
+
+function avgLayerScore(layer, pool, norms, key) {
+  const scores = layer.slots
+    .map(s => s[key] ? pool.find(m => m.id === s[key]) : null)
+    .map(m => m ? wsmScore(m, layer.name, norms) : null)
+    .filter(s => s != null);
+  return scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
+}
+
+function layerNames(layer, pool, key) {
+  const names = layer.slots
+    .map(s => s[key] ? pool.find(m => m.id === s[key])?.name : null)
+    .filter(Boolean);
+  return names.length ? names.join(' + ') : null;
+}
+
+function DeltaTag({ a, b }) {
+  if (a == null || b == null) return <Minus size={11} style={{ color: THEME.inkFaint }} />;
+  const d = a - b;
+  if (d === 0) return <span className="font-mono text-[10px]" style={{ color: THEME.inkFaint }}>tie</span>;
+  const color = d > 0 ? PALETTE[0] : PALETTE[1];
+  return (
+    <span className="font-mono text-[10px]" style={{ color, fontWeight: 600 }}>
+      {d > 0 ? '◄ +' : '+'}{Math.abs(d)}{d > 0 ? '' : ' ►'}
+    </span>
+  );
+}
+
+function ComparisonSummary({ layers, pool, norms }) {
+  const overallA = overallFor(layers, pool, norms, 'materialId');
+  const overallB = overallFor(layers, pool, norms, 'materialIdB');
+  const hasAny = overallA != null || overallB != null;
+  const winner = overallA != null && overallB != null
+    ? (overallA === overallB ? 'tie' : overallA > overallB ? 'A' : 'B')
+    : null;
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      <div className="px-6 py-4 flex-shrink-0" style={{ borderBottom: `1px solid ${THEME.border}` }}>
+        <div className="flex items-baseline gap-3">
+          <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: THEME.inkMuted }}>
+            Suit comparison
+          </span>
+          <span className="font-mono text-[9px]" style={{ color: THEME.inkFaint }}>Suit 1 vs Suit 2 · per-layer WSM score</span>
+        </div>
+      </div>
+
+      {/* Overall scores */}
+      <div className="flex items-stretch gap-3 px-6 py-3 flex-shrink-0" style={{ borderBottom: `1px solid ${THEME.border}`, background: THEME.paper }}>
+        {[['Suit 1', overallA, PALETTE[0], 'A'], ['Suit 2', overallB, PALETTE[1], 'B']].map(([label, sc, color, k]) => (
+          <div key={k} className="flex-1 rounded px-3 py-2"
+            style={{ border: `1px solid ${winner === k ? color : THEME.borderSoft}`,
+              background: winner === k ? `${color}10` : THEME.paperLight }}>
+            <div className="flex items-center gap-1.5 mb-1">
+              <span className="font-mono uppercase" style={{ fontSize: 9, letterSpacing: '0.08em', color }}>{label}</span>
+              {winner === k && <CheckCircle2 size={11} style={{ color }} />}
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="font-display" style={{ fontSize: 24, color: THEME.ink, lineHeight: 1 }}>
+                {sc != null ? sc : '—'}
+              </span>
+              <span className="font-mono text-[9px]" style={{ color: THEME.inkFaint }}>/ 100</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Per-layer diff */}
+      <div className="flex-1 overflow-y-auto scroll-thin px-6 py-4">
+        {!hasAny ? (
+          <div className="flex flex-col items-center justify-center h-full gap-2" style={{ color: THEME.inkFaint }}>
+            <Columns2 size={20} style={{ opacity: 0.4 }} />
+            <span className="text-xs font-body text-center">
+              Assign a material to Suit 1 and/or Suit 2 in a layer to compare them.
+            </span>
+          </div>
+        ) : (
+          <>
+            <div className="font-mono text-[10px] uppercase tracking-wider mb-3" style={{ color: THEME.inkMuted }}>
+              Per-layer scores
+            </div>
+            <div className="rounded overflow-hidden" style={{ border: `1px solid ${THEME.border}` }}>
+              <table className="w-full" style={{ borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: THEME.paper }}>
+                    {['#', 'Layer', 'Suit 1', 'Suit 2', 'Δ'].map(h => (
+                      <th key={h} className="font-mono text-left px-2 py-2"
+                        style={{ fontSize: 9, letterSpacing: '0.05em', color: THEME.inkMuted, fontWeight: 500, whiteSpace: 'nowrap' }}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {layers.map((layer, idx) => {
+                    const color = PALETTE[idx % PALETTE.length];
+                    const sa = avgLayerScore(layer, pool, norms, 'materialId');
+                    const sb = avgLayerScore(layer, pool, norms, 'materialIdB');
+                    const na = layerNames(layer, pool, 'materialId');
+                    const nb = layerNames(layer, pool, 'materialIdB');
+                    return (
+                      <tr key={layer.id} style={{ borderTop: `1px solid ${THEME.borderSoft}` }}>
+                        <td className="px-2 py-2 align-top">
+                          <span className="font-mono" style={{ fontSize: 9, background: color, color: 'white', padding: '2px 5px', borderRadius: 2, fontWeight: 600 }}>
+                            {idx + 1}
+                          </span>
+                        </td>
+                        <td className="px-2 py-2 font-body" style={{ fontSize: 12, color: THEME.ink, fontWeight: 500, maxWidth: 120 }}>
+                          <div className="truncate" title={layer.name}>{layer.name}</div>
+                        </td>
+                        <td className="px-2 py-2" style={{ minWidth: 96 }}>
+                          <div className="font-body truncate mb-1" style={{ fontSize: 10, color: na ? THEME.inkMuted : THEME.inkFaint, maxWidth: 110 }} title={na ?? ''}>{na ?? '—'}</div>
+                          {sa != null ? <ScoreBadge score={sa} width={36} /> : <span className="font-mono" style={{ fontSize: 10, color: THEME.inkFaint }}>—</span>}
+                        </td>
+                        <td className="px-2 py-2" style={{ minWidth: 96 }}>
+                          <div className="font-body truncate mb-1" style={{ fontSize: 10, color: nb ? THEME.inkMuted : THEME.inkFaint, maxWidth: 110 }} title={nb ?? ''}>{nb ?? '—'}</div>
+                          {sb != null ? <ScoreBadge score={sb} width={36} /> : <span className="font-mono" style={{ fontSize: 10, color: THEME.inkFaint }}>—</span>}
+                        </td>
+                        <td className="px-2 py-2 text-center" style={{ whiteSpace: 'nowrap' }}>
+                          <DeltaTag a={sa} b={sb} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="font-mono text-[9px] mt-3" style={{ color: THEME.inkFaint }}>
+              Δ shows the Suit 1 − Suit 2 score gap. ◄ favors Suit 1, ► favors Suit 2. Scores are per-layer WSM averages (0–100) vs. the active material pool.
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
    MAIN EXPORT
    ============================================================ */
 
@@ -931,6 +1125,8 @@ export default function SpacesuitBuilder({ materials: liveMaterials, onSnapshot 
   const [layers, setLayers] = useState(() =>
     DEFAULT_LAYERS.map(name => makeLayer(name))
   );
+
+  const [compareMode, setCompareMode] = useState(false);
 
   const addLayer = () =>
     setLayers(prev => [...prev, makeLayer(`Layer ${prev.length + 1}`)]);
@@ -991,9 +1187,27 @@ export default function SpacesuitBuilder({ materials: liveMaterials, onSnapshot 
         style={{ width: 420, minWidth: 420, background: THEME.paperLight, borderRight: `1px solid ${THEME.border}` }}>
 
         <div className="px-4 py-3 flex-shrink-0" style={{ borderBottom: `1px solid ${THEME.border}` }}>
-          <div className="font-display italic" style={{ fontSize: 16, color: THEME.ink }}>Suit Configuration</div>
+          <div className="flex items-center gap-2">
+            <div className="font-display italic flex-1" style={{ fontSize: 16, color: THEME.ink }}>Suit Configuration</div>
+            <button
+              className="btn btn-ghost flex-shrink-0"
+              onClick={() => setCompareMode(v => !v)}
+              title={compareMode ? 'Exit comparison mode' : 'Compare two material picks per layer (Suit 1 vs Suit 2)'}
+              style={{
+                fontSize: 10, padding: '4px 8px',
+                color: compareMode ? 'white' : THEME.inkMuted,
+                background: compareMode ? PALETTE[1] : 'transparent',
+                border: `1px solid ${compareMode ? PALETTE[1] : THEME.border}`,
+                borderRadius: 3,
+              }}
+            >
+              <Columns2 size={11} /> Compare
+            </button>
+          </div>
           <div className="font-mono text-[9px] uppercase tracking-widest mt-0.5" style={{ color: THEME.inkFaint }}>
-            {layers.length} layer{layers.length !== 1 ? 's' : ''} · outer to inner · each layer supports multiple materials
+            {compareMode
+              ? 'comparison mode · pick a material for suit 1 and suit 2 in each layer'
+              : `${layers.length} layer${layers.length !== 1 ? 's' : ''} · outer to inner · each layer supports multiple materials`}
           </div>
         </div>
 
@@ -1015,6 +1229,7 @@ export default function SpacesuitBuilder({ materials: liveMaterials, onSnapshot 
               onRemove={() => removeLayer(layer.id)}
               onMove={dir => moveLayer(layer.id, dir)}
               norms={norms}
+              compareMode={compareMode}
             />
           ))}
         </div>
@@ -1028,7 +1243,9 @@ export default function SpacesuitBuilder({ materials: liveMaterials, onSnapshot 
 
       {/* ── Right: visual summary ── */}
       <main className="flex-1 overflow-hidden" style={{ background: THEME.paper }}>
-        <SuitSummary layers={layers} pool={pool} norms={norms} />
+        {compareMode
+          ? <ComparisonSummary layers={layers} pool={pool} norms={norms} />
+          : <SuitSummary layers={layers} pool={pool} norms={norms} />}
       </main>
 
     </div>
