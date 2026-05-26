@@ -1,8 +1,9 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Trash2, ChevronUp, ChevronDown, Search, X, AlertCircle, Info } from 'lucide-react';
+import { Plus, Trash2, ChevronUp, ChevronDown, Search, X, AlertCircle, Info, Sparkles, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { THEME, PALETTE } from '../theme.js';
 import { MATERIALS } from '../data/materials.js';
+import { analyzeBuild } from '../lib/aiAnalyze.js';
 
 const fmt = (n, d = 2) => {
   if (!Number.isFinite(n)) return '—';
@@ -65,6 +66,26 @@ function wsmScore(material, layerName, norms) {
     score += w * norm;
   }
   return Math.round(score * 100);
+}
+
+/* Compact, serializable snapshot of the build for the AI reviewer. */
+function buildReviewPayload(layers, pool, norms) {
+  return {
+    layers: layers.map((layer, index) => ({
+      index,
+      name: layer.name,
+      slots: layer.slots.map((s) => {
+        const mat = s.materialId ? pool.find((m) => m.id === s.materialId) : null;
+        return {
+          plies: s.plies,
+          name: mat?.name ?? null,
+          family: mat?.family ?? null,
+          props: mat?.props ?? null,
+          score: mat ? wsmScore(mat, layer.name, norms) : null,
+        };
+      }),
+    })),
+  };
 }
 
 function scoreColor(s) {
@@ -504,6 +525,162 @@ function LayerCard({ layer, index, total, pool, color, onUpdate, onRemove, onMov
 }
 
 /* ============================================================
+   AI REVIEW PANEL — qualitative second opinion on the build.
+   Bring-your-own-key, advisory only; never emits a score.
+   ============================================================ */
+
+const VERDICT_STYLE = {
+  good:     { icon: CheckCircle2,  color: 'hsl(140,55%,38%)', label: 'Good' },
+  workable: { icon: Info,          color: THEME.inkMuted,     label: 'Workable' },
+  concern:  { icon: AlertTriangle, color: THEME.accent,       label: 'Concern' },
+};
+
+function BuildReviewPanel({ layers, pool, norms }) {
+  const [apiKey, setApiKey] = useState(() => {
+    try { return localStorage.getItem('ashby:anthropicKey') || ''; } catch { return ''; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('ashby:anthropicKey', apiKey); } catch {}
+  }, [apiKey]);
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [review, setReview] = useState(null);
+
+  const hasMaterial = layers.some((l) => l.slots.some((s) => s.materialId));
+
+  async function run() {
+    setError('');
+    setLoading(true);
+    setReview(null);
+    try {
+      const payload = buildReviewPayload(layers, pool, norms);
+      setReview(await analyzeBuild(payload, apiKey.trim()));
+    } catch (e) {
+      setError(e?.message || 'Review failed.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="mt-5 rounded" style={{ border: `1px solid ${THEME.border}`, background: THEME.paperLight }}>
+      <div className="flex items-center gap-1.5 px-3 py-2" style={{ borderBottom: `1px solid ${THEME.borderSoft}` }}>
+        <Sparkles size={12} style={{ color: THEME.accent }} />
+        <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: THEME.inkMuted }}>
+          AI review
+        </span>
+        <span className="font-mono text-[9px] ml-auto" style={{ color: THEME.inkFaint }}>
+          advisory · qualitative
+        </span>
+      </div>
+
+      <div className="px-3 py-2.5 flex flex-col gap-2">
+        <input
+          type="password"
+          value={apiKey}
+          onChange={(e) => setApiKey(e.target.value)}
+          placeholder="Anthropic API key (sk-ant-…)"
+          autoComplete="off"
+          className="font-mono w-full"
+          style={{
+            fontSize: 11, padding: '4px 6px',
+            border: `1px solid ${THEME.border}`, background: THEME.paper,
+            color: THEME.ink, borderRadius: 3, outline: 'none',
+          }}
+        />
+        <div className="font-mono text-[9px] leading-snug" style={{ color: THEME.inkFaint }}>
+          stored in this browser only · used for your own calls ·{' '}
+          <a href="https://console.anthropic.com" target="_blank" rel="noreferrer" style={{ color: THEME.accent }}>get a key</a>
+        </div>
+        <button
+          className="btn btn-primary"
+          onClick={run}
+          disabled={loading || !hasMaterial}
+          style={{ opacity: loading || !hasMaterial ? 0.5 : 1, justifyContent: 'center' }}
+          title={hasMaterial ? 'Ask the model to review this suit configuration' : 'Assign a material to at least one layer first'}
+        >
+          {loading
+            ? <><Loader2 size={12} className="ai-spin" /> Analysing…</>
+            : <><Sparkles size={12} /> Analyse this suit</>}
+        </button>
+
+        {error && <div className="text-[11px]" style={{ color: THEME.accent }}>{error}</div>}
+
+        {review && (
+          <div className="flex flex-col gap-3 pt-1">
+            {review.summary && (
+              <p className="font-body" style={{ fontSize: 12, lineHeight: 1.5, color: THEME.ink }}>
+                {review.summary}
+              </p>
+            )}
+
+            {review.layers.length > 0 && (
+              <div className="flex flex-col gap-2">
+                {review.layers.map((l, i) => {
+                  const vs = VERDICT_STYLE[l.verdict] ?? VERDICT_STYLE.workable;
+                  const VIcon = vs.icon;
+                  return (
+                    <div key={i} className="rounded px-2.5 py-2" style={{ background: THEME.paper, border: `1px solid ${THEME.borderSoft}` }}>
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <VIcon size={12} style={{ color: vs.color, flexShrink: 0 }} />
+                        <span className="font-body truncate" style={{ fontSize: 12, fontWeight: 600, color: THEME.ink }}>{l.name}</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wider ml-auto" style={{ color: vs.color }}>{vs.label}</span>
+                      </div>
+                      {l.note && (
+                        <p className="font-body" style={{ fontSize: 11, lineHeight: 1.45, color: THEME.inkMuted }}>{l.note}</p>
+                      )}
+                      {l.suggestions.length > 0 && (
+                        <ul className="mt-1.5 flex flex-col gap-1">
+                          {l.suggestions.map((s, j) => (
+                            <li key={j} className="font-body flex gap-1.5" style={{ fontSize: 11, lineHeight: 1.4, color: THEME.inkMuted }}>
+                              <span style={{ color: THEME.accent }}>→</span>{s}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {review.interactions.length > 0 && (
+              <ReviewList title="Cross-layer notes" items={review.interactions} icon={AlertTriangle} color={THEME.accent} />
+            )}
+            {review.missing.length > 0 && (
+              <ReviewList title="Gaps" items={review.missing} icon={AlertCircle} color={THEME.inkMuted} />
+            )}
+
+            <div className="font-mono text-[9px] leading-snug" style={{ color: THEME.inkFaint }}>
+              AI-generated advisory notes — review against the WSM scores and your own judgement before acting.
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ReviewList({ title, items, icon: Icon, color }) {
+  return (
+    <div>
+      <div className="flex items-center gap-1.5 mb-1">
+        <Icon size={11} style={{ color }} />
+        <span className="font-mono text-[9px] uppercase tracking-wider" style={{ color: THEME.inkMuted }}>{title}</span>
+      </div>
+      <ul className="flex flex-col gap-1">
+        {items.map((s, i) => (
+          <li key={i} className="font-body flex gap-1.5" style={{ fontSize: 11, lineHeight: 1.4, color: THEME.inkMuted }}>
+            <span style={{ color }}>•</span>{s}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/* ============================================================
    SUIT SUMMARY — right panel
    ============================================================ */
 
@@ -716,6 +893,7 @@ function SuitSummary({ layers, pool, norms }) {
             <div className="font-mono text-[9px] mt-1" style={{ color: THEME.inkFaint }}>
               Score: WSM 0–100 vs. pool range, weighted per layer role (rename a layer to a preset — Outer Shell, Thermal Insulation, Pressure Bladder, Inner Liner — for tailored weights).
             </div>
+            <BuildReviewPanel layers={layers} pool={pool} norms={norms} />
           </>
         )}
       </div>
