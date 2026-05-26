@@ -174,7 +174,18 @@ export async function analyzeBuild(build, apiKey) {
     throw new Error('Review was cut off (response too long). Try fewer layers, or retry.');
   }
   const out = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
-  const result = sanitize(extractJson(out));
+
+  let parsed;
+  try {
+    parsed = extractJson(out);
+  } catch (e) {
+    // Surface what actually came back so the failure is diagnosable.
+    const tail = out.trim().slice(-220) || '(empty response)';
+    console.error('[aiAnalyze] parse failed', { stop_reason: data.stop_reason, raw: out });
+    throw new Error(`Could not parse model response (stop: ${data.stop_reason ?? 'n/a'}). Ends with: …${tail}`);
+  }
+
+  const result = sanitize(parsed);
   if (!result.relevant) {
     throw new Error('The model did not recognize this as a protective-suit build.');
   }
