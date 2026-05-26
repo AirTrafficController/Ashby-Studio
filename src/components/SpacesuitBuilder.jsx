@@ -120,7 +120,8 @@ function ScoreBadge({ score, width = 48 }) {
 
 function PropsCard({ material, top, left }) {
   if (!material) return null;
-  const p = material.props;
+  const p = material.props || {};
+  const bar = (n) => Number.isFinite(n) ? '■'.repeat(n) + '□'.repeat(4 - n) : '—';
 
   const clampedLeft = Math.min(left, window.innerWidth - 210);
   const clampedTop  = Math.min(top,  window.innerHeight - 280);
@@ -131,8 +132,8 @@ function PropsCard({ material, top, left }) {
     ['Modulus',   `${fmt(p.modulus)} GPa`],
     ['Strength',  `${fmt(p.strength, 0)} MPa`],
     ['T_max',     `${fmt(p.tMax, 0)} °C`],
-    ['Cost',      '■'.repeat(p.cost) + '□'.repeat(4 - p.cost)],
-    ['Chem res.', '■'.repeat(p.chemRes) + '□'.repeat(4 - p.chemRes)],
+    ['Cost',      bar(p.cost)],
+    ['Chem res.', bar(p.chemRes)],
   ];
 
   return createPortal(
@@ -202,7 +203,7 @@ function MaterialSearch({ pool, selectedId, onSelect }) {
           m.name.toLowerCase().includes(q) ||
           (m.family ?? '').toLowerCase().includes(q))
       : pool;
-    return base.slice(0, 14);
+    return base;
   }, [pool, query]);
 
   const updateRect = () => {
@@ -416,7 +417,7 @@ function SlotRow({ slot, pool, onUpdate, onRemove, canRemove, layerName, norms }
               <div key={key} className="flex flex-col items-center" style={{ minWidth: 26 }}>
                 <span className="font-mono" style={{ fontSize: 9, color: THEME.inkFaint }}>{sym}</span>
                 <span className="font-mono text-[11px]" style={{ color: THEME.ink, fontWeight: 500 }}>
-                  {fmt(material.props[key], key === 'tMax' ? 0 : 2)}
+                  {fmt(material.props?.[key], key === 'tMax' ? 0 : 2)}
                 </span>
               </div>
             ))}
@@ -780,7 +781,7 @@ function SuitSummary({ layers, pool, norms }) {
           {configuredSlots.length > 0 && (
             <Stat label="Min T-max °C"
               value={fmt(Math.min(...configuredSlots.map(s =>
-                pool.find(m => m.id === s.materialId)?.props.tMax ?? Infinity)), 0)} />
+                pool.find(m => m.id === s.materialId)?.props?.tMax ?? Infinity)), 0)} />
           )}
           {overallScore != null && (
             <div className="flex flex-col">
@@ -858,25 +859,27 @@ function SuitSummary({ layers, pool, norms }) {
                             {slot.plies}
                           </td>
                           <td className="px-2 py-2 font-mono text-right" style={{ fontSize: 11, color: THEME.ink }}>
-                            {mat ? fmt(mat.props.density) : '—'}
+                            {fmt(mat?.props?.density)}
                           </td>
                           <td className="px-2 py-2 font-mono text-right" style={{ fontSize: 11, color: THEME.ink }}>
-                            {mat ? fmt(mat.props.modulus) : '—'}
+                            {fmt(mat?.props?.modulus)}
                           </td>
                           <td className="px-2 py-2 font-mono text-right" style={{ fontSize: 11, color: THEME.ink }}>
-                            {mat ? fmt(mat.props.strength, 0) : '—'}
+                            {fmt(mat?.props?.strength, 0)}
                           </td>
                           <td className="px-2 py-2 font-mono text-right" style={{ fontSize: 11, color: THEME.ink }}>
-                            {mat ? fmt(mat.props.tMax, 0) : '—'}
+                            {fmt(mat?.props?.tMax, 0)}
                           </td>
                           <td className="px-2 py-2 font-mono text-center" style={{ fontSize: 11, color: THEME.ink }}>
-                            {mat ? mat.props.cost : '—'}
+                            {mat?.props?.cost ?? '—'}
                           </td>
                           <td className="px-2 py-2 font-mono text-center" style={{ fontSize: 11, color: THEME.ink }}>
-                            {mat ? mat.props.chemRes : '—'}
+                            {mat?.props?.chemRes ?? '—'}
                           </td>
                           <td className="px-2 py-2" style={{ minWidth: 88 }}>
-                            {mat ? <ScoreBadge score={wsmScore(mat, layer.name, norms)} /> : (
+                            {mat && wsmScore(mat, layer.name, norms) != null ? (
+                              <ScoreBadge score={wsmScore(mat, layer.name, norms)} />
+                            ) : (
                               <span className="font-mono" style={{ fontSize: 11, color: THEME.inkFaint }}>—</span>
                             )}
                           </td>
@@ -923,7 +926,11 @@ export default function SpacesuitBuilder({ materials: liveMaterials, onSnapshot 
     const src = Array.isArray(liveMaterials) && liveMaterials.length
       ? liveMaterials
       : MATERIALS;
-    return src.filter(m => m.props && typeof m.props.density === 'number');
+    // Show every material the chart has. Point-cloud CSV uploads carry
+    // no property data, so they can't be WSM-scored — they still appear
+    // (rendered as "—") but sort below materials with full properties.
+    const hasProps = m => m.props && typeof m.props.density === 'number';
+    return [...src].sort((a, b) => (hasProps(b) ? 1 : 0) - (hasProps(a) ? 1 : 0));
   }, [liveMaterials]);
 
   const norms = useMemo(() => computeNorms(pool), [pool]);
