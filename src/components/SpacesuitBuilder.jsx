@@ -918,6 +918,254 @@ function Stat({ label, value }) {
 }
 
 /* ============================================================
+   SUIT METRICS + COMPARISON VIEW
+   ============================================================ */
+
+function computeSuitMetrics(layers, pool, norms) {
+  const rows = layers.map((layer, idx) => {
+    const mats = layer.slots
+      .map((s) => {
+        const m = s.materialId ? pool.find((mm) => mm.id === s.materialId) : null;
+        return m ? { name: m.name, score: wsmScore(m, layer.name, norms) } : null;
+      })
+      .filter(Boolean);
+    const scored = mats.filter((m) => m.score != null);
+    const avgScore = scored.length
+      ? Math.round(scored.reduce((a, b) => a + b.score, 0) / scored.length)
+      : null;
+    const plies = layer.slots.reduce((s, sl) => s + sl.plies, 0);
+    return {
+      name: layer.name,
+      color: PALETTE[idx % PALETTE.length],
+      plies,
+      avgScore,
+      names: mats.map((m) => m.name),
+      assigned: mats.length > 0,
+    };
+  });
+
+  let num = 0, den = 0;
+  for (const layer of layers) {
+    for (const s of layer.slots) {
+      const m = s.materialId ? pool.find((mm) => mm.id === s.materialId) : null;
+      const sc = m ? wsmScore(m, layer.name, norms) : null;
+      if (sc != null) { num += sc * s.plies; den += s.plies; }
+    }
+  }
+  const overallScore = den > 0 ? Math.round(num / den) : null;
+
+  const allSlots = layers.flatMap((l) => l.slots);
+  const configured = allSlots.filter((s) => s.materialId);
+  const totalPlies = allSlots.reduce((s, sl) => s + sl.plies, 0);
+  const minTMax = configured.length
+    ? Math.min(...configured.map((s) => pool.find((m) => m.id === s.materialId)?.props?.tMax ?? Infinity))
+    : null;
+  const assignedLayers = layers.filter((l) => l.slots.some((s) => s.materialId)).length;
+
+  return { rows, overallScore, totalPlies, minTMax, assignedLayers, totalLayers: layers.length };
+}
+
+function CrossSection({ rows }) {
+  if (rows.length === 0) {
+    return <div className="text-xs font-body py-4 text-center" style={{ color: THEME.inkFaint }}>No layers.</div>;
+  }
+  return (
+    <div className="flex flex-col gap-1.5">
+      {rows.map((r, i) => {
+        const barH = 24 + (r.plies - 1) * 4;
+        return (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: barH }}>
+            <span className="font-mono text-right flex-shrink-0 truncate"
+              style={{ width: 96, fontSize: 9, color: THEME.ink, fontWeight: 500 }} title={r.name}>
+              {r.name}
+            </span>
+            <div style={{
+              flex: 1, height: barH,
+              background: r.assigned ? r.color : THEME.borderSoft,
+              opacity: r.assigned ? 0.8 : 0.35,
+              borderRadius: 2, display: 'flex', alignItems: 'center',
+              paddingLeft: 8, paddingRight: 8, overflow: 'hidden',
+            }}>
+              <span className="font-mono truncate"
+                style={{ fontSize: 9, color: r.assigned ? 'white' : THEME.inkFaint, fontWeight: 600,
+                  textShadow: r.assigned ? '0 1px 2px rgba(0,0,0,0.3)' : 'none' }}>
+                {r.assigned ? `${r.names.join(' + ')}${r.plies > 1 ? ` (${r.plies} pl.)` : ''}` : '— none —'}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* One row in the head-to-head stat table. `better` = 'high' | 'low' */
+function CompareRow({ label, a, b, better, suffix = '' }) {
+  const fa = Number.isFinite(a), fb = Number.isFinite(b);
+  let winA = false, winB = false;
+  if (fa && fb && a !== b) {
+    const aWins = better === 'low' ? a < b : a > b;
+    winA = aWins; winB = !aWins;
+  }
+  const cell = (v, win) => (
+    <td className="px-3 py-2 font-mono text-center" style={{
+      fontSize: 12, color: win ? THEME.ink : THEME.inkMuted, fontWeight: win ? 700 : 500,
+      background: win ? 'rgba(120,160,90,0.12)' : 'transparent',
+    }}>
+      {Number.isFinite(v) ? `${v}${suffix}` : '—'}
+    </td>
+  );
+  return (
+    <tr style={{ borderTop: `1px solid ${THEME.borderSoft}` }}>
+      <td className="px-3 py-2 font-mono" style={{ fontSize: 10, color: THEME.inkMuted, whiteSpace: 'nowrap' }}>{label}</td>
+      {cell(a, winA)}
+      {cell(b, winB)}
+    </tr>
+  );
+}
+
+function ComparisonView({ suits, pool, norms }) {
+  const a = useMemo(() => computeSuitMetrics(suits.A, pool, norms), [suits.A, pool, norms]);
+  const b = useMemo(() => computeSuitMetrics(suits.B, pool, norms), [suits.B, pool, norms]);
+
+  const scoreDelta = (a.overallScore != null && b.overallScore != null)
+    ? a.overallScore - b.overallScore : null;
+
+  const maxLayers = Math.max(a.rows.length, b.rows.length);
+
+  return (
+    <div className="flex-1 overflow-y-auto scroll-thin px-6 py-5">
+      {/* Headline score cards */}
+      <div className="grid mb-5" style={{ gridTemplateColumns: '1fr 1fr', gap: 18 }}>
+        {[['Suit A', a, b], ['Suit B', b, a]].map(([label, m, other]) => {
+          const wins = m.overallScore != null && other.overallScore != null && m.overallScore > other.overallScore;
+          return (
+            <div key={label} className="rounded px-4 py-3" style={{
+              border: `1px solid ${wins ? 'hsl(95,40%,45%)' : THEME.border}`,
+              background: wins ? 'rgba(120,160,90,0.08)' : THEME.paperLight,
+            }}>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="font-display italic" style={{ fontSize: 15, color: THEME.ink }}>{label}</span>
+                {wins && <span className="font-mono text-[9px] uppercase tracking-wider" style={{ color: 'hsl(95,40%,38%)' }}>higher score</span>}
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className="font-display" style={{ fontSize: 32, lineHeight: 1, color: THEME.ink }}>
+                  {m.overallScore ?? '—'}
+                </span>
+                <span className="font-mono text-[10px]" style={{ color: THEME.inkFaint }}>/ 100 suit score</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {scoreDelta != null && scoreDelta !== 0 && (
+        <div className="font-body text-center mb-5" style={{ fontSize: 12, color: THEME.inkMuted }}>
+          Suit {scoreDelta > 0 ? 'A' : 'B'} scores <strong>{Math.abs(scoreDelta)}</strong> point{Math.abs(scoreDelta) !== 1 ? 's' : ''} higher overall.
+        </div>
+      )}
+
+      {/* Head-to-head stats */}
+      <div className="font-mono text-[10px] uppercase tracking-wider mb-2" style={{ color: THEME.inkMuted }}>Head to head</div>
+      <div className="rounded overflow-hidden mb-6" style={{ border: `1px solid ${THEME.border}` }}>
+        <table className="w-full" style={{ borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ background: THEME.paper }}>
+              <th className="px-3 py-2 font-mono text-left" style={{ fontSize: 9, color: THEME.inkMuted, fontWeight: 500 }}>Metric</th>
+              <th className="px-3 py-2 font-mono text-center" style={{ fontSize: 9, color: THEME.inkMuted, fontWeight: 500 }}>Suit A</th>
+              <th className="px-3 py-2 font-mono text-center" style={{ fontSize: 9, color: THEME.inkMuted, fontWeight: 500 }}>Suit B</th>
+            </tr>
+          </thead>
+          <tbody>
+            <CompareRow label="Suit score" a={a.overallScore} b={b.overallScore} better="high" />
+            <CompareRow label="Assigned layers" a={a.assignedLayers} b={b.assignedLayers} better="high" />
+            <CompareRow label="Layers" a={a.totalLayers} b={b.totalLayers} better="high" />
+            <CompareRow label="Total plies" a={a.totalPlies} b={b.totalPlies} better="low" />
+            <CompareRow label="Min T-max °C" a={a.minTMax} b={b.minTMax} better="high" />
+          </tbody>
+        </table>
+      </div>
+
+      {/* Per-layer score comparison */}
+      <div className="font-mono text-[10px] uppercase tracking-wider mb-2" style={{ color: THEME.inkMuted }}>Per-layer score</div>
+      <div className="rounded overflow-hidden mb-6" style={{ border: `1px solid ${THEME.border}` }}>
+        <table className="w-full" style={{ borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ background: THEME.paper }}>
+              <th className="px-3 py-2 font-mono text-left" style={{ fontSize: 9, color: THEME.inkMuted, fontWeight: 500 }}>Layer</th>
+              <th className="px-3 py-2 font-mono text-center" style={{ fontSize: 9, color: THEME.inkMuted, fontWeight: 500 }}>A</th>
+              <th className="px-3 py-2 font-mono text-center" style={{ fontSize: 9, color: THEME.inkMuted, fontWeight: 500 }}>B</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from({ length: maxLayers }).map((_, i) => {
+              const ra = a.rows[i], rb = b.rows[i];
+              const label = ra?.name ?? rb?.name ?? `Layer ${i + 1}`;
+              return (
+                <CompareRow key={i} label={label}
+                  a={ra?.avgScore ?? NaN} b={rb?.avgScore ?? NaN} better="high" />
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Cross-sections side by side */}
+      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 18 }}>
+        {[['Suit A', a], ['Suit B', b]].map(([label, m]) => (
+          <div key={label}>
+            <div className="flex items-baseline gap-2 mb-2">
+              <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: THEME.inkMuted }}>{label}</span>
+              <span className="font-mono text-[9px]" style={{ color: THEME.inkFaint }}>outer → inner</span>
+            </div>
+            <CrossSection rows={m.rows} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SuitTabs({ active, setActive, onCopy }) {
+  const tab = (id, label) => {
+    const on = active === id;
+    return (
+      <button
+        onClick={() => setActive(id)}
+        className="font-mono"
+        style={{
+          fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase',
+          padding: '6px 14px', border: 'none', cursor: 'pointer',
+          background: on ? THEME.ink : 'transparent',
+          color: on ? THEME.paper : THEME.inkMuted,
+          borderRadius: 4,
+        }}
+      >
+        {label}
+      </button>
+    );
+  };
+  return (
+    <div className="flex items-center gap-1 px-4 py-2 flex-shrink-0"
+      style={{ borderBottom: `1px solid ${THEME.border}`, background: THEME.paperLight }}>
+      {tab('A', 'Suit A')}
+      {tab('B', 'Suit B')}
+      {tab('compare', 'Compare')}
+      {active !== 'compare' && (
+        <button
+          onClick={onCopy}
+          className="btn btn-ghost font-mono ml-auto"
+          style={{ fontSize: 10, color: THEME.inkMuted }}
+          title={`Copy Suit ${active} over Suit ${active === 'A' ? 'B' : 'A'}`}
+        >
+          Copy {active} → {active === 'A' ? 'B' : 'A'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
    MAIN EXPORT
    ============================================================ */
 
@@ -935,18 +1183,47 @@ export default function SpacesuitBuilder({ materials: liveMaterials, onSnapshot 
 
   const norms = useMemo(() => computeNorms(pool), [pool]);
 
-  const [layers, setLayers] = useState(() =>
-    DEFAULT_LAYERS.map(name => makeLayer(name))
-  );
+  // Two independent suit configurations for side-by-side comparison.
+  const [suits, setSuits] = useState(() => ({
+    A: DEFAULT_LAYERS.map((name) => makeLayer(name)),
+    B: DEFAULT_LAYERS.map((name) => makeLayer(name)),
+  }));
+  const [active, setActive] = useState('A'); // 'A' | 'B' | 'compare'
+
+  // The suit currently being edited (Compare mode falls back to A so the
+  // report snapshot and helpers always have a concrete target).
+  const editing = active === 'compare' ? 'A' : active;
+  const layers = suits[editing];
+
+  const setLayers = (updater) =>
+    setSuits((prev) => ({
+      ...prev,
+      [editing]: typeof updater === 'function' ? updater(prev[editing]) : updater,
+    }));
+
+  const copyActiveSuit = () => {
+    const from = active === 'A' ? 'A' : 'B';
+    const to = from === 'A' ? 'B' : 'A';
+    setSuits((prev) => ({
+      ...prev,
+      // Deep-clone layers and slots with fresh ids so the two suits
+      // never share mutable references.
+      [to]: prev[from].map((l) => ({
+        id: uid(),
+        name: l.name,
+        slots: l.slots.map((s) => ({ ...s, id: uid() })),
+      })),
+    }));
+  };
 
   const addLayer = () =>
-    setLayers(prev => [...prev, makeLayer(`Layer ${prev.length + 1}`)]);
+    setLayers((prev) => [...prev, makeLayer(`Layer ${prev.length + 1}`)]);
 
-  const removeLayer = id =>
-    setLayers(prev => prev.filter(l => l.id !== id));
+  const removeLayer = (id) =>
+    setLayers((prev) => prev.filter((l) => l.id !== id));
 
   const updateLayer = (id, patch) =>
-    setLayers(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l));
+    setLayers((prev) => prev.map((l) => l.id === id ? { ...l, ...patch } : l));
 
   /* Push current build state up so the report exporter can summarize
      suit configuration and per-layer scores without owning the state. */
@@ -991,14 +1268,21 @@ export default function SpacesuitBuilder({ materials: liveMaterials, onSnapshot 
     });
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden">
+
+      <SuitTabs active={active} setActive={setActive} onCopy={copyActiveSuit} />
+
+      {active === 'compare' ? (
+        <ComparisonView suits={suits} pool={pool} norms={norms} />
+      ) : (
+      <div className="flex flex-1 overflow-hidden">
 
       {/* ── Left: layer builder ── */}
       <aside className="flex flex-col overflow-hidden"
         style={{ width: 420, minWidth: 420, background: THEME.paperLight, borderRight: `1px solid ${THEME.border}` }}>
 
         <div className="px-4 py-3 flex-shrink-0" style={{ borderBottom: `1px solid ${THEME.border}` }}>
-          <div className="font-display italic" style={{ fontSize: 16, color: THEME.ink }}>Suit Configuration</div>
+          <div className="font-display italic" style={{ fontSize: 16, color: THEME.ink }}>Suit {active} Configuration</div>
           <div className="font-mono text-[9px] uppercase tracking-widest mt-0.5" style={{ color: THEME.inkFaint }}>
             {layers.length} layer{layers.length !== 1 ? 's' : ''} · outer to inner · each layer supports multiple materials
           </div>
@@ -1037,6 +1321,9 @@ export default function SpacesuitBuilder({ materials: liveMaterials, onSnapshot 
       <main className="flex-1 overflow-hidden" style={{ background: THEME.paper }}>
         <SuitSummary layers={layers} pool={pool} norms={norms} />
       </main>
+
+      </div>
+      )}
 
     </div>
   );
