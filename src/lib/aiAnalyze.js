@@ -62,15 +62,27 @@ function strArr(v, max) {
     .map((s) => s.trim().slice(0, 240));
 }
 
-/* Extract the first balanced JSON object, tolerating stray prose
-   or code fences the model might add despite instructions. */
+/* Extract the first balanced JSON object, tolerating stray prose or
+   code fences the model might add despite instructions. Tracks string
+   state so braces or quotes inside string values (common in free-text
+   notes) don't throw off the depth counter. */
 function extractJson(text) {
   const start = text.indexOf('{');
   if (start === -1) throw new Error('No JSON object in model response');
   let depth = 0;
+  let inStr = false;
+  let escaped = false;
   for (let i = start; i < text.length; i++) {
-    if (text[i] === '{') depth++;
-    else if (text[i] === '}') {
+    const c = text[i];
+    if (inStr) {
+      if (escaped) escaped = false;
+      else if (c === '\\') escaped = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === '{') depth++;
+    else if (c === '}') {
       depth--;
       if (depth === 0) return JSON.parse(text.slice(start, i + 1));
     }
