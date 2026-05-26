@@ -156,7 +156,12 @@ export async function analyzeBuild(build, apiKey) {
         model: MODEL,
         max_tokens: 3000,
         system: SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: describeBuild(build) }],
+        messages: [
+          { role: 'user', content: describeBuild(build) },
+          // Prefill the assistant turn so the reply is pure JSON from
+          // the first character — no prose or markdown fences to parse.
+          { role: 'assistant', content: '{' },
+        ],
       }),
     });
   } catch (e) {
@@ -173,7 +178,8 @@ export async function analyzeBuild(build, apiKey) {
   if (data.stop_reason === 'max_tokens') {
     throw new Error('Review was cut off (response too long). Try fewer layers, or retry.');
   }
-  const out = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+  // Re-attach the prefilled '{' the model continued from.
+  const out = '{' + (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
 
   let parsed;
   try {
